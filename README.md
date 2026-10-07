@@ -40,3 +40,19 @@ Chart.js は `fantracker/static/` に同梱しており、オフラインで動�
 
 `tests/test_e2e.py` はヘッドレス Chromium で画面を操作する。初回のみ `.venv/bin/playwright install chromium` が必要
 (Chromium を起動できない環境ではスキップされる)。
+
+## Windows 11 での動作確認
+
+リポジトリ直下で、次のどちらかを実行する(セットアップ → 自動確認 → pytest → サンプル画像の準備 → 起動まで一括)。
+
+```powershell
+scripts\windows\verify_windows.bat
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\verify_windows.ps1
+```
+
+オプション: `-SkipTests`(pytest を省く)、`-E2E`(Chromium を入れてブラウザ操作のテストも実行)、`-NoStart`(起動しない)。
+自動確認の本体は `scripts/verify_smoke.py`(OS 非依存。`python scripts/verify_smoke.py` 単体でも実行できる)。
+日本語フォントの表示、Excel での CSV 表示、実スクリーンショットの読み取りは、スクリプトが表示するチェックリストに沿って目視で確認する。

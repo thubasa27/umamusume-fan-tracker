@@ -1,0 +1,113 @@
+﻿<#
+.SYNOPSIS
+  Windows 11 での動作確認を一括で行う(セットアップ → 自動確認 → サンプル準備 → 起動)。
+
+.DESCRIPTION
+  1. Python(3.11 以上)の確認、.venv の作成、依存のインストール
+  2. 実サーバーを一時データで起動して HTTP 経由で自動確認(scripts/verify_smoke.py)
+  3. pytest(既定では E2E を除く)
+  4. 撮影日時入りのサンプル画像を一時フォルダに用意してエクスプローラーで開く
+  5. 目視確認の項目を表示し、アプリを起動(Ctrl+C で停止)
+
+.PARAMETER SkipTests
+  pytest を実行しない。
+.PARAMETER E2E
+  Chromium を入れて、ブラウザ操作の E2E テストも実行する(初回はダウンロードに時間がかかる)。
+.PARAMETER NoStart
+  確認とサンプル準備だけ行い、アプリは起動しない。
+#>
+param(
+    [switch]$SkipTests,
+    [switch]$E2E,
+    [switch]$NoStart
+)
+
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:PYTHONUTF8 = '1'
+
+$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+Set-Location $root
+
+function Write-Step([string]$text) { Write-Host "`n=== $text ===" -ForegroundColor Cyan }
+function Stop-WithError([string]$text) { Write-Host "エラー: $text" -ForegroundColor Red; exit 1 }
+
+# --- 1. Python と仮想環境 ---------------------------------------------------
+Write-Step '1. Python と仮想環境'
+$pyExe = $null
+$pyArgs = @()
+if (Get-Command py -ErrorAction SilentlyContinue) { $pyExe = 'py'; $pyArgs = @('-3') }
+elseif (Get-Command python -ErrorAction SilentlyContinue) { $pyExe = 'python' }
+else { Stop-WithError 'Python が見つかりません。winget install Python.Python.3.11 などで入れてください。' }
+
+$verText = (& $pyExe @pyArgs -c "import sys; print('%d.%d' % sys.version_info[:2])").Trim()
+if ([version]$verText -lt [version]'3.11') { Stop-WithError "Python $verText が見つかりました。3.11 以上が必要です。" }
+Write-Host "Python $verText"
+
+$venvPy = Join-Path $root '.venv\Scripts\python.exe'
+if (-not (Test-Path $venvPy)) {
+    & $pyExe @pyArgs -m venv .venv
+    if ($LASTEXITCODE -ne 0) { Stop-WithError '仮想環境を作れませんでした。' }
+}
+& $venvPy -m pip install -q -r requirements.txt
+if ($LASTEXITCODE -ne 0) { Stop-WithError '依存のインストールに失敗しました。' }
+Write-Host '依存のインストール: OK'
+
+$failed = @()
+
+# --- 2. 自動確認(HTTP 経由) ------------------------------------------------
+Write-Step '2. 自動確認(実サーバーを一時データで起動)'
+& $venvPy scripts\verify_smoke.py
+if ($LASTEXITCODE -ne 0) { $failed += '自動確認(verify_smoke.py)' }
+
+# --- 3. pytest ---------------------------------------------------------------
+if (-not $SkipTests) {
+    Write-Step '3. pytest'
+    if ($E2E) {
+        & $venvPy -m playwright install chromium
+        if ($LASTEXITCODE -ne 0) { $failed += 'Chromium のインストール' }
+        & $venvPy -m pytest -q
+    } else {
+        & $venvPy -m pytest -q --ignore=tests/test_e2e.py
+    }
+    if ($LASTEXITCODE -ne 0) { $failed += 'pytest' }
+}
+
+if ($failed.Count -gt 0) {
+    Write-Host "`n失敗した項目:" -ForegroundColor Red
+    $failed | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
+    exit 1
+}
+
+# --- 4. サンプル画像の準備 ---------------------------------------------------
+Write-Step '4. サンプル画像の準備'
+$samples = Join-Path $env:TEMP 'fantracker_verify_samples'
+New-Item -ItemType Directory -Force -Path $samples | Out-Null
+$map = @(
+    @('sample_3.jpg', '20261005200000_1.jpg', '2,654,906,664', '集計日 2026-10-05'),
+    @('sample_2.jpg', '20261006200000_1.jpg', '2,658,611,645', '集計日 2026-10-06'),
+    @('sample_1.jpg', '20261008043000_1.jpg', '2,672,583,581', '集計日 2026-10-07(AM5:00 前なので前日)')
+)
+foreach ($m in $map) {
+    Copy-Item (Join-Path $root "tests\fixtures\$($m[0])") (Join-Path $samples $m[1]) -Force
+    Write-Host ("  {0}  ->  {1}   期待値 {2} / {3}" -f $m[0], $m[1], $m[2], $m[3])
+}
+Write-Host "サンプルの場所: $samples"
+
+# --- 5. 目視確認 → 起動 ------------------------------------------------------
+Write-Step '自動確認はすべて成功しました'
+Write-Host @'
+以下は目視で確認してください(詳細は README / 手順書を参照)。
+  [ ] 日本語が四角にならず表示される(タブ名・ボタン・グラフの凡例)
+  [ ] 取り込みタブに上のサンプルをドロップ → 読み取り値と集計日が期待値どおり、警告なし
+  [ ] 「警告のない項目をすべて確定」→ ダッシュボードにグラフと表が出る
+  [ ] 「PNG でダウンロード」で保存した画像が開け、日本語が崩れていない
+  [ ] CSV エクスポートを Excel でダブルクリックで開いて、文字化けしない
+  [ ] 実際に撮ったスクリーンショットの値が、画面の「総獲得数」と一致する
+'@
+
+if ($NoStart) { Write-Host "`n-NoStart のため起動しません。起動: .venv\Scripts\python -m fantracker"; exit 0 }
+
+Start-Process explorer.exe $samples
+Write-Host "`nアプリを起動します(http://127.0.0.1:8000/ 、停止は Ctrl+C)"
+& $venvPy -m fantracker
