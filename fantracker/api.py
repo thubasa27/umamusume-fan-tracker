@@ -8,10 +8,11 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
-from . import anomaly, dates, ocr
+from . import anomaly, csvio, dates, ocr, summary
 from .db import DuplicateImage, Store
 
 DEFAULT_DATA_DIR = Path("data")
@@ -136,4 +137,52 @@ def create_app(data_dir: Path | str = DEFAULT_DATA_DIR) -> FastAPI:
         if not store.delete(record_id):
             raise HTTPException(404, "記録がありません")
 
+    @app.get("/api/summary")
+    def get_summary(period: str = "all", interpolate: bool = False):
+        """period は "7" / "30" / "all"。週次・月次は期間によらず全期間で集計する。"""
+        if period not in {"7", "30", "all"}:
+            raise HTTPException(422, "period は 7 / 30 / all のいずれか")
+        series = summary.build_series(store.list(), interpolate)
+        return {
+            "series": summary.filter_period(series, None if period == "all" else int(period)),
+            "weekly": summary.aggregate(series, "week"),
+            "monthly": summary.aggregate(series, "month"),
+            "interpolate": interpolate,
+        }
+
+    @app.get("/api/export.csv")
+    def export_csv():
+        body = csvio.export_csv(store.list(include_history=True), store.list())
+        return Response(body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": 'attachment; filename="fan_records.csv"'})
+
+    @app.post("/api/import/csv")
+    async def import_csv(file: UploadFile = File(...), mode: str = Form("report")):
+        """mode: report=登録せず衝突を報告 / skip=集計日が重複する行を飛ばす / overwrite=重複する集計日の既存記録を置き換える。"""
+        if mode not in {"report", "skip", "overwrite"}:
+            raise HTTPException(422, "mode は report / skip / overwrite のいずれか")
+        rows, errors = csvio.parse_csv(await file.read())
+        existing_dates = {r["business_date"] for r in store.list(include_history=True)}
+        conflicts = sorted({r["business_date"].isoformat() for r in rows} & existing_dates)
+        result = {"rows": len(rows), "errors": errors, "conflict_dates": conflicts,
+                  "imported": 0, "skipped_duplicates": 0, "skipped_conflicts": 0}
+        if mode == "report" or errors and not rows:
+            return result
+        if mode == "overwrite":
+            for rec in store.list(include_history=True):
+                if rec["business_date"] in conflicts:
+                    store.delete(rec["id"])
+        for row in rows:
+            if mode == "skip" and row["business_date"].isoformat() in conflicts:
+                result["skipped_conflicts"] += 1
+                continue
+            try:
+                store.add(**row)
+                result["imported"] += 1
+            except DuplicateImage:
+                result["skipped_duplicates"] += 1
+        return result
+
+    static_dir = Path(__file__).parent / "static"
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
     return app
