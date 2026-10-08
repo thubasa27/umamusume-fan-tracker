@@ -131,7 +131,7 @@ def run(base: str) -> None:
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:  # 後片付けの失敗で確認結果を落とさない
         server, thread, base = start_server(tmp)
         try:
             run(base)

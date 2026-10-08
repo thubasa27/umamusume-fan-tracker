@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
 
@@ -39,7 +40,13 @@ def create_app(data_dir: Path | str = DEFAULT_DATA_DIR) -> FastAPI:
     image_dir = data_dir / "images"
     image_dir.mkdir(parents=True, exist_ok=True)
     store = Store.open(data_dir / "fantracker.db")
-    app = FastAPI(title="ウマ娘 ファン数トラッカー")
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        yield
+        store.conn.close()  # Windows では開いたままの DB ファイルを削除・移動できない
+
+    app = FastAPI(title="ウマ娘 ファン数トラッカー", lifespan=lifespan)
     app.state.store = store
 
     def image_path(image_hash: str) -> Path | None:
