@@ -155,8 +155,10 @@ def test_csv_import_conflict_modes_and_errors(client):
 def test_static_pages_are_served(client):
     html = client.get("/")
     assert html.status_code == 200 and "ファン数トラッカー" in html.text
-    for path in ("/app.js", "/style.css", "/chart.umd.min.js"):
+    for path in ("/app.js", "/style.css", "/chart.umd.min.js", "/favicon.svg"):
         assert client.get(path).status_code == 200
+    assert 'rel="icon"' in html.text
+    assert client.get("/favicon.svg").headers["content-type"].startswith("image/svg+xml")
     assert client.get("/api/records").status_code == 200  # 静的配信が API を隠さない
 
 
