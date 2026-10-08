@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 import pytest
+import synthetic
 import uvicorn
 
 pw = pytest.importorskip("playwright.sync_api")
@@ -12,7 +13,6 @@ pw = pytest.importorskip("playwright.sync_api")
 from fantracker import security  # noqa: E402
 from fantracker.api import create_app  # noqa: E402
 
-FIXTURES = Path(__file__).parent / "fixtures"
 
 
 TOKENS = {}  # サーバーの URL → 認証トークン(画面は、トークン付きの URL を開いて Cookie を受け取る)
@@ -91,7 +91,7 @@ def open_page(server, init_script=None):
 
 def upload(page, *pairs):
     """(フィクスチャ名, アップロード時のファイル名) を取り込みタブから読み込む。"""
-    files = [{"name": up, "mimeType": "image/jpeg", "buffer": (FIXTURES / src).read_bytes()} for src, up in pairs]
+    files = [{"name": up, "mimeType": "image/jpeg", "buffer": synthetic.sample_bytes(src)} for src, up in pairs]
     page.set_input_files("#file-input", files)
     wait_js(page, "document.querySelector('#scan-status').textContent.includes('件を読み取りました')")
 

@@ -15,7 +15,8 @@ python -m venv .venv
 
 - 読み取り領域は `fantracker/layout.json` の相対座標で指定する(ゲームのレイアウト変更時はここを差し替える)。
 - 数字は `fantracker/templates.npz` のテンプレートと照合する。再生成は `PYTHONPATH=. python scripts/build_templates.py`。
-  テンプレートは sample_1 の「総獲得数」以外の行から作るため、総獲得数の3枚は読み取りテストとして独立している。
+  テンプレートは、実際のスクリーンショットの「総獲得数」以外の行(育成回数など)から作った。元の画像はリポジトリに含めない
+  (再生成するには、手元の画像を `tests/fixtures/local/sample_1.jpg` に置く)。
 
 ## 起動
 
@@ -43,6 +44,11 @@ Chart.js は `fantracker/static/` に同梱しており、オフラインで動�
 
 `tests/test_e2e.py` はヘッドレス Chromium で画面を操作する。初回のみ `.venv/bin/playwright install chromium` が必要
 (Chromium を起動できない環境ではスキップされる)。
+
+**テスト用の画像**: ゲームのスクリーンショットはリポジトリに含めない。テストは、数字テンプレートから作る合成画像(`tests/synthetic.py`)で、
+読み取りの流れ(切り出し・分割・照合・API・画面)を確認する。合成画像は、文字がテンプレートそのものなので、**未知の画像での読み取り精度は確認できない**。
+実際のスクリーンショットでの確認は、手元の画像を `tests/fixtures/local/`(`.gitignore` で除外)に置いて `tests/test_real_samples.py` で行う
+(画像が無ければスキップされる。置き方は、そのファイルの冒頭を参照)。
 
 ## Windows 11 での動作確認
 

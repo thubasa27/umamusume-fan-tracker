@@ -1,11 +1,9 @@
-from pathlib import Path
-
 import pytest
 
 from fantracker.api import create_app
+import synthetic
 from helpers import make_client
 
-FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
@@ -14,8 +12,7 @@ def client(tmp_path):
 
 
 def scan(client, name, upload_name):
-    with open(FIXTURES / name, "rb") as f:
-        r = client.post("/api/scan", files=[("files", (upload_name, f, "image/jpeg"))])
+    r = client.post("/api/scan", files=[("files", (upload_name, synthetic.sample_bytes(name), "image/jpeg"))])
     assert r.status_code == 200
     return r.json()["results"][0]
 

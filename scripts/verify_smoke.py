@@ -24,8 +24,9 @@ sys.path.insert(0, str(ROOT))
 from fantracker import security  # noqa: E402
 from fantracker.api import create_app  # noqa: E402
 
-FIXTURES = ROOT / "tests" / "fixtures"
-# (フィクスチャ, アップロード名, 期待値, 期待する集計日)
+sys.path.insert(0, str(ROOT / "tests"))
+import synthetic  # noqa: E402  合成のスクリーンショット(tests/synthetic.py)
+# (合成画像の名前, アップロード名, 期待値, 期待する集計日)
 SAMPLES = [
     ("sample_3.jpg", "20261005200000_1.jpg", 2_654_906_664, "2026-10-05"),
     ("sample_2.jpg", "20261006200000_1.jpg", 2_658_611_645, "2026-10-06"),
@@ -57,7 +58,7 @@ def start_server(data_dir: str) -> tuple[uvicorn.Server, threading.Thread, str, 
 
 
 def scan(c: httpx.Client, fixture: str, upload_name: str) -> dict:
-    r = c.post("/api/scan", files=[("files", (upload_name, (FIXTURES / fixture).read_bytes(), "image/jpeg"))])
+    r = c.post("/api/scan", files=[("files", (upload_name, synthetic.sample_bytes(fixture), "image/jpeg"))])
     r.raise_for_status()
     return r.json()["results"][0]
 

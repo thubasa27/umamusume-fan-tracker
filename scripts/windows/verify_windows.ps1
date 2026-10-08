@@ -6,7 +6,7 @@
   1. Python(3.11 以上)の確認、.venv の作成、依存のインストール
   2. 実サーバーを一時データで起動して HTTP 経由で自動確認(scripts/verify_smoke.py)
   3. pytest(既定では E2E を除く)
-  4. 撮影日時入りのサンプル画像を一時フォルダに用意する(フォルダは開かない)
+  4. 撮影日時入りの合成サンプル画像を一時フォルダに用意する(フォルダは開かない。実際のゲーム画像はリポジトリに含めない)
   5. 目視確認の項目を表示し、アプリを起動(Ctrl+C で停止)
 
 .PARAMETER SkipTests
@@ -87,16 +87,9 @@ if ($failed.Count -gt 0) {
 Write-Step '4. サンプル画像の準備'
 $samples = Join-Path $env:TEMP 'fantracker_verify_samples'
 New-Item -ItemType Directory -Force -Path $samples | Out-Null
-$map = @(
-    @('sample_3.jpg', '20261005200000_1.jpg', '2,654,906,664', '集計日 2026-10-05'),
-    @('sample_2.jpg', '20261006200000_1.jpg', '2,658,611,645', '集計日 2026-10-06'),
-    @('sample_1.jpg', '20261008043000_1.jpg', '2,672,583,581', '集計日 2026-10-07(AM5:00 前なので前日)')
-)
-foreach ($m in $map) {
-    Copy-Item (Join-Path $root "tests\fixtures\$($m[0])") (Join-Path $samples $m[1]) -Force
-    Write-Host ("  {0}  ->  {1}   期待値 {2} / {3}" -f $m[0], $m[1], $m[2], $m[3])
-}
-Write-Host "サンプルの場所: $samples"
+# ゲームの画像は、リポジトリに含めない。数字テンプレートから合成したスクリーンショットを作る
+& $venvPy scripts\make_samples.py $samples
+if ($LASTEXITCODE -ne 0) { Stop-WithError 'サンプル画像を作れませんでした。' }
 
 # --- 5. 目視確認 → 起動 ------------------------------------------------------
 Write-Step '自動確認はすべて成功しました'
@@ -107,7 +100,7 @@ Write-Host @'
   [ ] 「警告のない項目をすべて確定」→ ダッシュボードにグラフと表が出る
   [ ] 「PNG でダウンロード」で保存した画像が開け、日本語が崩れていない
   [ ] CSV エクスポートを Excel でダブルクリックで開いて、文字化けしない
-  [ ] 実際に撮ったスクリーンショットの値が、画面の「総獲得数」と一致する
+  [ ] 実際に撮ったスクリーンショットの値が、画面の「総獲得数」と一致する(合成画像は、読み取りの流れの確認用)
 '@
 
 if ($NoStart) { Write-Host "`n-NoStart のため起動しません。起動: .venv\Scripts\python -m fantracker"; exit 0 }

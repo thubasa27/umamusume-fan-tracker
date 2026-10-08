@@ -1,16 +1,15 @@
 """他サイトからのローカル API へのアクセス対策(fantracker/security.py)。"""
-from pathlib import Path
 
 import pytest
 from urllib.parse import urlsplit
 
+import synthetic
 from fastapi.testclient import TestClient
 from helpers import make_client
 
 from fantracker import security
 from fantracker.api import create_app
 
-FIXTURES = Path(__file__).parent / "fixtures"
 CSV = "business_date,captured_at,fan_total\n2026-10-05,2026-10-05T20:00:00,1000\n".encode("utf-8-sig")
 
 
@@ -59,7 +58,7 @@ def test_host_allowlist_is_configurable(tmp_path):
 
 def writes(c):
     """書き込み系のリクエストをすべて送って、ステータスの一覧を返す。"""
-    img = (FIXTURES / "sample_1.jpg").read_bytes()
+    img = synthetic.sample_bytes("sample_1.jpg")
     return {
         "scan": c.post("/api/scan", files=[("files", ("20261007204638_1.jpg", img, "image/jpeg"))]).status_code,
         "create": c.post("/api/records", json={"fan_total": 1000, "captured_at": "2026-10-07T12:00:00"}).status_code,
