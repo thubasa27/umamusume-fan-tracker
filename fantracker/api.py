@@ -4,17 +4,18 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
-from . import anomaly, csvio, dates, ocr, paths, summary
+from . import __version__, anomaly, csvio, dates, ocr, paths, summary
 from .db import DuplicateImage, Store
 
 IMAGE_SUFFIXES = {"JPEG": ".jpg", "PNG": ".png"}
@@ -36,8 +37,15 @@ class RecordPatch(BaseModel):
     business_date: date | None = None
 
 
-def create_app(data_dir: Path | str | None = None) -> FastAPI:
-    """data_dir 省略時は実行ファイルと同じフォルダの data/(fantracker.paths.data_dir)。"""
+def create_app(
+    data_dir: Path | str | None = None,
+    mode: str = "browser",
+    on_shutdown: Callable[[], None] | None = None,
+) -> FastAPI:
+    """data_dir 省略時は実行ファイルと同じフォルダの data/(fantracker.paths.data_dir)。
+
+    mode は "window"(専用ウィンドウ)か "browser"(ブラウザ)。on_shutdown は、ブラウザ表示の「終了」ボタンで呼ぶ。
+    """
     data_dir = Path(data_dir) if data_dir else paths.data_dir()
     image_dir = data_dir / "images"
     image_dir.mkdir(parents=True, exist_ok=True)
@@ -50,6 +58,23 @@ def create_app(data_dir: Path | str | None = None) -> FastAPI:
 
     app = FastAPI(title="ウマ娘 ファン数トラッカー", lifespan=lifespan)
     app.state.store = store
+    app.state.mode = mode
+
+    @app.get("/api/info")
+    def info():
+        browser = app.state.mode == "browser"
+        return {"version": __version__, "mode": app.state.mode, "can_shutdown": browser and on_shutdown is not None}
+
+    @app.post("/api/shutdown")
+    def shutdown(request: Request):
+        """ブラウザ表示のときの終了。カスタムヘッダー必須(他のサイトからの単純なリクエストでは止められない)。"""
+        if app.state.mode != "browser" or on_shutdown is None:
+            raise HTTPException(404)
+        if request.headers.get("x-fantracker") != "1":
+            raise HTTPException(403, "X-FanTracker ヘッダーが必要です")
+        log.info("終了が要求されました")
+        on_shutdown()
+        return {"ok": True}
 
     def image_path(image_hash: str) -> Path | None:
         if not image_hash.isalnum():

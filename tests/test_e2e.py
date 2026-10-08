@@ -14,29 +14,49 @@ from fantracker.api import create_app  # noqa: E402
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-@pytest.fixture
-def server(tmp_path):
+def serve(app):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    srv = uvicorn.Server(uvicorn.Config(create_app(tmp_path), host="127.0.0.1", port=port, log_level="warning"))
+    srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     t = threading.Thread(target=srv.run, daemon=True)
     t.start()
     while not srv.started:
         time.sleep(0.05)
-    yield f"http://127.0.0.1:{port}"
+    yield f"http://127.0.0.1:{port}", srv
     srv.should_exit = True
     t.join(5)
 
 
 @pytest.fixture
+def server(tmp_path):
+    for url, _ in serve(create_app(tmp_path)):
+        yield url
+
+
+@pytest.fixture
+def server_with_quit(tmp_path):
+    box = {}
+    app = create_app(tmp_path, mode="browser", on_shutdown=lambda: setattr(box["srv"], "should_exit", True))
+    for url, srv in serve(app):
+        box["srv"] = srv
+        yield url, srv
+
+
+@pytest.fixture
 def page(server):
+    yield from open_page(server)
+
+
+def open_page(server, init_script=None):
     with pw.sync_playwright() as p:
         try:
             browser = p.chromium.launch()
         except Exception as e:  # ブラウザ未インストール
             pytest.skip(f"chromium を起動できません: {e}")
         pg = browser.new_page(accept_downloads=True)
+        if init_script:
+            pg.add_init_script(init_script)
         errors = []
         pg.on("pageerror", lambda e: errors.append(str(e)))
         pg.goto(server)
@@ -137,3 +157,53 @@ def test_dashboard_defaults_to_30_days_with_interpolation(page):
     page.click("nav button[data-tab=dashboard]")
     assert page.input_value("#period") == "30"
     assert page.is_checked("#interpolate")
+
+
+# 専用ウィンドウ(pywebview)では window.pywebview.api.save_file が使える。偽の実装を差し込んで保存の流れを確認する
+FAKE_PYWEBVIEW = """
+window.__saved = [];
+window.pywebview = { api: { save_file: async (name, b64) => { window.__saved.push({name, b64}); return {saved: true, path: 'C:\\\\out\\\\' + name}; } } };
+"""
+
+
+def test_native_save_for_csv_and_chart_png(server):
+    import base64
+
+    for pg in open_page(server, FAKE_PYWEBVIEW):
+        pg.click("nav button[data-tab=records]")
+        pg.fill("#manual-form input[name=fan_total]", "2600000000")
+        pg.fill("#manual-form input[name=captured_at]", "2026-10-07T12:00")
+        pg.click("#manual-form button")
+        pg.wait_for_selector("#manual-msg.ok")
+
+        pg.click("#export-link")  # ダウンロードではなく保存ダイアログ経由になる
+        pg.wait_for_function("window.__saved.length === 1")
+        saved = pg.evaluate("window.__saved[0]")
+        assert saved["name"] == "fan_records.csv"
+        assert base64.b64decode(saved["b64"]).startswith(b"\xef\xbb\xbfbusiness_date")
+        assert "保存しました" in pg.inner_text("#toast")
+
+        pg.click("nav button[data-tab=dashboard]")
+        pg.wait_for_selector("#tbl-daily tbody tr")
+        pg.click("button.dl[data-chart=chart-total]")
+        pg.wait_for_function("window.__saved.length === 2")
+        png = pg.evaluate("window.__saved[1]")
+        assert png["name"] == "fan_total.png" and base64.b64decode(png["b64"])[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_quit_button_is_hidden_without_shutdown_callback(page):
+    page.wait_for_load_state("networkidle")
+    assert page.is_hidden("#quit")  # 専用ウィンドウなど、終了を受け付けない場合は出さない
+
+
+def test_quit_button_stops_the_app_in_browser_mode(server_with_quit):
+    url, srv = server_with_quit
+    for pg in open_page(url):
+        pg.wait_for_selector("#quit:not([hidden])")
+        pg.once("dialog", lambda d: d.accept())
+        pg.click("#quit")
+        pg.wait_for_selector("text=終了しました")
+    deadline = time.time() + 5
+    while not srv.should_exit and time.time() < deadline:
+        time.sleep(0.05)
+    assert srv.should_exit

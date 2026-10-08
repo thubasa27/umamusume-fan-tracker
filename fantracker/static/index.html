@@ -9,7 +9,10 @@
 </head>
 <body>
 <header>
-  <h1>ウマ娘 ファン数トラッカー</h1>
+  <div class="title-row">
+    <h1>ウマ娘 ファン数トラッカー</h1>
+    <button id="quit" hidden>終了</button>
+  </div>
   <nav>
     <button data-tab="import" class="active">取り込み</button>
     <button data-tab="dashboard">ダッシュボード</button>
@@ -80,6 +83,7 @@
     <table id="tbl-records"></table>
   </section>
 </main>
+<div id="toast" role="status" hidden></div>
 <script src="chart.umd.min.js"></script>
 <script src="app.js"></script>
 </body>

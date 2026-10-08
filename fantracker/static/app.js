@@ -34,6 +34,45 @@ async function api(path, opts) {
   return res.status === 204 ? null : res.json();
 }
 
+// ---------- 保存(専用ウィンドウでは保存ダイアログ、ブラウザでは通常のダウンロード) ----------
+let toastTimer;
+function toast(text, isError = false) {
+  const t = $("#toast");
+  t.textContent = text;
+  t.className = isError ? "err" : "";
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
+}
+
+const nativeSave = () => window.pywebview && window.pywebview.api && window.pywebview.api.save_file;
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(",")[1]);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+async function saveBlob(name, blob) {
+  const save = nativeSave();
+  if (!save) {
+    const url = URL.createObjectURL(blob);
+    el("a", { href: url, download: name }).click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    return;
+  }
+  try {
+    const res = await save(name, await blobToBase64(blob));
+    if (res.saved) toast(`保存しました: ${res.path}`);
+    else if (res.error) toast(res.error, true);
+  } catch (e) {
+    toast("保存に失敗しました: " + e, true);
+  }
+}
+
 // ゲームの日替わり(AM 5:00)で集計日を求める。サーバー側(fantracker/dates.py)と同じ規則。
 const DAY_START_HOUR = 5;
 function businessDate(localDateTime) {
@@ -225,7 +264,7 @@ document.querySelectorAll("button.dl").forEach((b) =>
   b.addEventListener("click", () => {
     const chart = charts[b.dataset.chart];
     if (!chart) return;
-    el("a", { href: chart.toBase64Image("image/png", 1), download: `${b.dataset.name}.png` }).click();
+    chart.canvas.toBlob((blob) => blob && saveBlob(`${b.dataset.name}.png`, blob), "image/png");
   })
 );
 
@@ -279,6 +318,19 @@ function recordRow(r) {
 }
 $("#show-history").addEventListener("change", loadRecords);
 
+// 専用ウィンドウではダウンロードできないので、保存ダイアログ経由にする(ブラウザでは通常のリンクのまま)
+$("#export-link").addEventListener("click", async (e) => {
+  if (!nativeSave()) return;
+  e.preventDefault();
+  try {
+    const res = await fetch("/api/export.csv");
+    if (!res.ok) throw new Error(res.statusText);
+    await saveBlob("fan_records.csv", await res.blob());
+  } catch (err) {
+    toast("CSV を取得できませんでした: " + err.message, true);
+  }
+});
+
 $("#manual-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = e.target, msg = $("#manual-msg");
@@ -327,3 +379,19 @@ $("#csv-input").addEventListener("change", async (e) => {
     panel.replaceChildren(el("p", { class: "err" }, err.message));
   }
 });
+
+// ---------- 終了ボタン(ブラウザ表示のときだけ。専用ウィンドウは閉じれば終了する) ----------
+api("/api/info").then((info) => {
+  if (!info.can_shutdown) return;
+  const btn = $("#quit");
+  btn.hidden = false;
+  btn.addEventListener("click", async () => {
+    if (!confirm("アプリを終了しますか?")) return;
+    try {
+      await api("/api/shutdown", { method: "POST", headers: { "X-FanTracker": "1" } });
+      document.body.replaceChildren(el("p", { style: "padding:24px" }, "終了しました。このタブは閉じてください。"));
+    } catch (e) {
+      toast("終了できませんでした: " + e.message, true);
+    }
+  });
+}).catch(() => {});

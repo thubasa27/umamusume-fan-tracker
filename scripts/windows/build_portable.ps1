@@ -41,7 +41,8 @@ Copy-Item packaging\README-portable.txt (Join-Path $appDir 'README.txt') -Force
 
 Write-Step '3. できた exe の動作確認'
 # 作業フォルダを別の場所にして起動し、データが exe と同じフォルダに作られることも確認する
-$proc = Start-Process -FilePath $exe -WorkingDirectory $env:TEMP -PassThru -WindowStyle Minimized
+# --no-ui: 画面を出さずサーバーだけ起動する(専用ウィンドウの表示は、このあと手動で確認する)
+$proc = Start-Process -FilePath $exe -ArgumentList '--no-ui' -WorkingDirectory $env:TEMP -PassThru
 $ok = $false
 try {
     for ($i = 0; $i -lt 40 -and -not $ok; $i++) {
@@ -67,3 +68,4 @@ $zip = Join-Path $root "dist\FanTracker-portable-v$version.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
 Compress-Archive -Path $appDir -DestinationPath $zip
 Write-Host "できました: $zip" -ForegroundColor Green
+Write-Host "最後に、dist\FanTracker\FanTracker.exe をダブルクリックして、専用ウィンドウが開くことを確認してください。" -ForegroundColor Yellow
