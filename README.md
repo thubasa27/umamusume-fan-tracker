@@ -53,6 +53,7 @@ scripts\windows\verify_windows.bat
 powershell -ExecutionPolicy Bypass -File scripts\windows\verify_windows.ps1
 ```
 
-オプション: `-SkipTests`(pytest を省く)、`-E2E`(Chromium を入れてブラウザ操作のテストも実行)、`-NoStart`(起動しない)。
+オプション: `-SkipTests`(pytest を省く)、`-E2E`(Chromium を入れてブラウザ操作のテストも実行)、`-NoStart`(起動しない)、`-Minimized`(アプリを最小化した別ウィンドウで起動し、確認用のウィンドウは閉じる)。
+`.bat` は `-Minimized` 付きで実行する(失敗時だけウィンドウを残す)。最小化したアプリを止めるには、そのウィンドウを閉じる。
 自動確認の本体は `scripts/verify_smoke.py`(OS 非依存。`python scripts/verify_smoke.py` 単体でも実行できる)。
 日本語フォントの表示、Excel での CSV 表示、実スクリーンショットの読み取りは、スクリプトが表示するチェックリストに沿って目視で確認する。

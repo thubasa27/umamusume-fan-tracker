@@ -6,7 +6,7 @@
   1. Python(3.11 以上)の確認、.venv の作成、依存のインストール
   2. 実サーバーを一時データで起動して HTTP 経由で自動確認(scripts/verify_smoke.py)
   3. pytest(既定では E2E を除く)
-  4. 撮影日時入りのサンプル画像を一時フォルダに用意してエクスプローラーで開く
+  4. 撮影日時入りのサンプル画像を一時フォルダに用意する(フォルダは開かない)
   5. 目視確認の項目を表示し、アプリを起動(Ctrl+C で停止)
 
 .PARAMETER SkipTests
@@ -15,11 +15,15 @@
   Chromium を入れて、ブラウザ操作の E2E テストも実行する(初回はダウンロードに時間がかかる)。
 .PARAMETER NoStart
   確認とサンプル準備だけ行い、アプリは起動しない。
+.PARAMETER Minimized
+  アプリを最小化した別ウィンドウで起動し、このウィンドウは数秒後に閉じる。
+  アプリの停止は、最小化されたウィンドウを閉じる(または Ctrl+C)。
 #>
 param(
     [switch]$SkipTests,
     [switch]$E2E,
-    [switch]$NoStart
+    [switch]$NoStart,
+    [switch]$Minimized
 )
 
 $ErrorActionPreference = 'Stop'
@@ -108,6 +112,14 @@ Write-Host @'
 
 if ($NoStart) { Write-Host "`n-NoStart のため起動しません。起動: .venv\Scripts\python -m fantracker"; exit 0 }
 
-Start-Process explorer.exe $samples
+if ($Minimized) {
+    # 作業フォルダはこのウィンドウと同じ(データは同じ data\ に保存される)
+    Start-Process -FilePath $venvPy -ArgumentList '-m', 'fantracker' -WorkingDirectory $root -WindowStyle Minimized
+    Write-Host "`nアプリを最小化したウィンドウで起動しました(http://127.0.0.1:8000/ )。"
+    Write-Host '停止するには、タスクバーの最小化されたウィンドウを閉じてください。'
+    Start-Sleep -Seconds 3
+    exit 0
+}
+
 Write-Host "`nアプリを起動します(http://127.0.0.1:8000/ 、停止は Ctrl+C)"
 & $venvPy -m fantracker
