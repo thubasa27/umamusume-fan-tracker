@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import socket
 import sys
 import tempfile
@@ -129,6 +130,7 @@ def run(base: str) -> None:
 
 
 def main() -> int:
+    logging.getLogger("fantracker").setLevel(logging.ERROR)  # 警告のテストで出るログを画面に出さない
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:  # 後片付けの失敗で確認結果を落とさない

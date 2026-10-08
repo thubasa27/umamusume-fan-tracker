@@ -53,7 +53,7 @@ if (-not (Test-Path $venvPy)) {
     & $pyExe @pyArgs -m venv .venv
     if ($LASTEXITCODE -ne 0) { Stop-WithError '仮想環境を作れませんでした。' }
 }
-& $venvPy -m pip install -q -r requirements.txt
+& $venvPy -m pip install -q -r requirements-dev.txt
 if ($LASTEXITCODE -ne 0) { Stop-WithError '依存のインストールに失敗しました。' }
 Write-Host '依存のインストール: OK'
 

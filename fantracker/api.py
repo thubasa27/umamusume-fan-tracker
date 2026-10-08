@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
@@ -13,11 +14,11 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
-from . import anomaly, csvio, dates, ocr, summary
+from . import anomaly, csvio, dates, ocr, paths, summary
 from .db import DuplicateImage, Store
 
-DEFAULT_DATA_DIR = Path("data")
 IMAGE_SUFFIXES = {"JPEG": ".jpg", "PNG": ".png"}
+log = logging.getLogger("fantracker")
 
 
 class RecordIn(BaseModel):
@@ -35,8 +36,9 @@ class RecordPatch(BaseModel):
     business_date: date | None = None
 
 
-def create_app(data_dir: Path | str = DEFAULT_DATA_DIR) -> FastAPI:
-    data_dir = Path(data_dir)
+def create_app(data_dir: Path | str | None = None) -> FastAPI:
+    """data_dir 省略時は実行ファイルと同じフォルダの data/(fantracker.paths.data_dir)。"""
+    data_dir = Path(data_dir) if data_dir else paths.data_dir()
     image_dir = data_dir / "images"
     image_dir.mkdir(parents=True, exist_ok=True)
     store = Store.open(data_dir / "fantracker.db")
@@ -66,9 +68,11 @@ def create_app(data_dir: Path | str = DEFAULT_DATA_DIR) -> FastAPI:
                 img = Image.open(io.BytesIO(data))
                 img.load()
             except (UnidentifiedImageError, OSError):
+                log.warning("画像として読み込めません: %s", f.filename)
                 results.append({**item, "error": "画像として読み込めません"})
                 continue
             if img.format not in IMAGE_SUFFIXES:
+                log.warning("PNG/JPG 以外は取り込めません: %s (%s)", f.filename, img.format)
                 results.append({**item, "error": "PNG/JPG 以外は取り込めません"})
                 continue
 
@@ -94,6 +98,8 @@ def create_app(data_dir: Path | str = DEFAULT_DATA_DIR) -> FastAPI:
                 item["warnings"] += anomaly.check(
                     store.list(), dates.business_date(captured_at), read.value
                 )
+            if item["warnings"]:  # NFR-6: 読み取りの失敗・警告をログに残す
+                log.warning("読み取り警告 %s (読取値=%s): %s", f.filename, read.value, " / ".join(item["warnings"]))
             results.append(item)
         return {"results": results}
 
