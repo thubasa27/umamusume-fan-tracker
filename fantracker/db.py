@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS records (
 );
 CREATE INDEX IF NOT EXISTS idx_records_date ON records (business_date, captured_at);
 """
+SCHEMA_VERSION = 1
+# バージョン n への更新 SQL(n-1 → n)。列を足すときなどにここへ追加する。
+MIGRATIONS: dict[int, str] = {}
 COLUMNS = "id, business_date, captured_at, fan_total, filename, image_hash, adopted, manual, created_at"
 
 
@@ -27,6 +30,22 @@ class DuplicateImage(Exception):
     def __init__(self, record_id: int):
         super().__init__(f"同じ画像が登録済みです (id={record_id})")
         self.record_id = record_id
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """PRAGMA user_version でスキーマの版を管理する。0 は新規、または版管理前(v1.0.0)の DB で、どちらも版 1 と同じ。"""
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version > SCHEMA_VERSION:
+        raise RuntimeError(
+            f"このデータはより新しいバージョンのアプリで作られています(データの版 {version} > 対応する版 {SCHEMA_VERSION})。"
+            "アプリを更新してください。"
+        )
+    version = max(version, 1)
+    while version < SCHEMA_VERSION:
+        version += 1
+        conn.executescript(MIGRATIONS[version])
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    conn.commit()
 
 
 @dataclass
@@ -40,6 +59,7 @@ class Store:
         conn = sqlite3.connect(path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.executescript(SCHEMA)
+        _migrate(conn)
         return cls(conn)
 
     # --- 採用の再計算 -------------------------------------------------

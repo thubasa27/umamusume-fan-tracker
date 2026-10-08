@@ -9,6 +9,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from . import paths
+
 PKG_DIR = Path(__file__).parent
 LAYOUT_PATH = PKG_DIR / "layout.json"
 TEMPLATES_PATH = PKG_DIR / "templates.npz"
@@ -33,8 +35,19 @@ class ReadResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def load_layout(path: Path = LAYOUT_PATH) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+def load_layout(path: Path = LAYOUT_PATH, override: Path | None = None) -> dict:
+    """同梱の layout.json を読み、`data/layout.json` があればキー単位で上書きする。
+
+    ポータブル版では同梱ファイルを書き換えずに、レイアウト変更(NFR-4)へ対応できる。
+    """
+    layout = json.loads(path.read_text(encoding="utf-8"))
+    override = override if override is not None else paths.data_dir() / "layout.json"
+    if override.exists():
+        try:
+            layout.update(json.loads(override.read_text(encoding="utf-8")))
+        except json.JSONDecodeError as e:
+            raise ValueError(f"{override} の JSON が不正です: {e}") from e
+    return layout
 
 
 @lru_cache(maxsize=1)
