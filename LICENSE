@@ -1,0 +1,39 @@
+ウマ娘 ファン数トラッカー — 利用許諾 / License
+
+Copyright (c) 2026 thubasa27. All rights reserved.
+
+【日本語】
+
+1. 許諾
+   本ソフトウェア(以下「本ソフト」)を、作者から直接受け取った方が、個人の目的(非営利)で、変更を加えずに使うことを許諾します。
+
+2. 禁止事項
+   作者の事前の許可(メッセージでも構いません)なく、次のことはできません。
+   - 他の人への再配布・公開(アップロード、共有、転送を含みます)
+   - 改変、および本ソフトをもとにした別のソフトの作成
+   - 営利目的での利用
+
+3. 第三者のソフトウェア
+   本ソフトには、第三者が作成したソフトウェアが含まれています。それらは THIRD_PARTY_NOTICES.txt に記載された、それぞれの
+   ライセンスに従います。この許諾は、それらの権利や条件に影響しません。
+
+4. 非公式のツール
+   本ソフトは、ゲーム『ウマ娘 プリティーダービー』の非公式のファンツールで、ゲームの運営会社や権利者とは無関係です。
+   ゲームの名称・画面などは、各権利者のものです。ゲームの利用規約は、各自で確認してください。
+
+5. 無保証
+   本ソフトは現状のまま提供され、明示・黙示を問わず、いかなる保証もありません。本ソフトの使用により生じた損害
+   (データの消失、読み取りの誤りによる損害を含みます)について、作者は責任を負いません。
+   大切なデータは、data フォルダごとバックアップして、自分で保管してください。
+
+6. 終了
+   この許諾は、本条件に違反したときに、自動的に終了します。
+
+【English summary】
+
+Permission is granted to individuals who received this software directly from the author to use it, unmodified, for personal,
+non-commercial purposes. Without the author's prior permission, you may not redistribute it (including uploading or sharing it),
+modify it or create derivative works, or use it commercially. Third-party components are covered by their own licenses, listed in
+THIRD_PARTY_NOTICES.txt. This is an unofficial fan tool, not affiliated with the game's publisher or rights holders. THE SOFTWARE
+IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, AND THE AUTHOR IS NOT LIABLE FOR ANY DAMAGES ARISING FROM ITS USE. This permission
+terminates automatically if you violate these terms.
