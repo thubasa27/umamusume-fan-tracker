@@ -1,8 +1,13 @@
 :root { color-scheme: light; --accent: #2e9d48; --warn: #b45309; --err: #b91c1c; --line: #d6dbd7; --bg: #f6f8f6; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }  /* button などの display 指定で hidden が効かなくなるのを防ぐ */
 body { margin: 0; font: 15px/1.6 "Yu Gothic UI", "Meiryo", system-ui, sans-serif; background: var(--bg); color: #1f2a22; }
 header { background: var(--accent); color: #fff; padding: 8px 20px 0; }
 header h1 { margin: 0 0 6px; font-size: 18px; }
+.title-row { display: flex; justify-content: space-between; align-items: center; }
+.title-row button { background: transparent; color: #fff; border-color: #ffffff88; padding: 2px 12px; }
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #1f2a22; color: #fff; padding: 8px 16px; border-radius: 8px; max-width: 80vw; word-break: break-all; z-index: 10; }
+#toast.err { background: var(--err); }
 nav button { background: transparent; color: #fff; border: 0; padding: 8px 16px; cursor: pointer; font: inherit; border-radius: 6px 6px 0 0; }
 nav button.active { background: var(--bg); color: #1f2a22; font-weight: bold; }
 main { max-width: 1000px; margin: 0 auto; padding: 16px; }

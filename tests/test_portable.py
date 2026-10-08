@@ -82,9 +82,8 @@ def test_check_writable_creates_folder_and_rejects_unwritable(tmp_path):
     assert target.is_dir() and not (target / ".write_test").exists()
     blocker = tmp_path / "file"
     blocker.write_text("")
-    with pytest.raises(SystemExit) as e:
+    with pytest.raises(entry.StartupError, match="書き込めません"):
         entry.check_writable(blocker / "data")  # ファイルの下には作れない
-    assert "書き込めません" in str(e.value)
 
 
 def test_scan_warnings_are_written_to_log_file(tmp_path):

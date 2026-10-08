@@ -3,3 +3,4 @@ numpy
 fastapi
 uvicorn
 python-multipart
+pywebview>=6.0; sys_platform == "win32"

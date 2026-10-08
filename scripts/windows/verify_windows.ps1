@@ -16,8 +16,8 @@
 .PARAMETER NoStart
   確認とサンプル準備だけ行い、アプリは起動しない。
 .PARAMETER Minimized
-  アプリを最小化した別ウィンドウで起動し、このウィンドウは数秒後に閉じる。
-  アプリの停止は、最小化されたウィンドウを閉じる(または Ctrl+C)。
+  アプリを別プロセス(コンソールは最小化)で起動し、このウィンドウは数秒後に閉じる。
+  アプリは専用ウィンドウで開く。停止は、そのウィンドウを閉じる。
 #>
 param(
     [switch]$SkipTests,
@@ -115,11 +115,11 @@ if ($NoStart) { Write-Host "`n-NoStart のため起動しません。起動: .ve
 if ($Minimized) {
     # 作業フォルダはこのウィンドウと同じ(データは同じ data\ に保存される)
     Start-Process -FilePath $venvPy -ArgumentList '-m', 'fantracker' -WorkingDirectory $root -WindowStyle Minimized
-    Write-Host "`nアプリを最小化したウィンドウで起動しました(http://127.0.0.1:8000/ )。"
-    Write-Host '停止するには、タスクバーの最小化されたウィンドウを閉じてください。'
+    Write-Host "`nアプリを起動しました(専用ウィンドウ。コンソールは最小化)。"
+    Write-Host '停止するには、アプリのウィンドウを閉じてください。'
     Start-Sleep -Seconds 3
     exit 0
 }
 
-Write-Host "`nアプリを起動します(http://127.0.0.1:8000/ 、停止は Ctrl+C)"
+Write-Host "`nアプリを起動します(専用ウィンドウ。閉じると終了します)"
 & $venvPy -m fantracker

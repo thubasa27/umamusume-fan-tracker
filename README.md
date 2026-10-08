@@ -23,11 +23,14 @@ python -m venv .venv
 .venv/bin/python -m fantracker      # Windows: .venv\Scripts\python -m fantracker
 ```
 
-`http://127.0.0.1:8000/` がブラウザで開く(ローカル専用)。データ(SQLite、取り込んだ画像、ログ)は、**アプリと同じフォルダの `data/`** に保存される(カレントディレクトリには依存しない。`fantracker/paths.py`)。
+Windows では**専用ウィンドウ**(WebView2。Windows 11 に標準で入っている)で開き、ウィンドウを閉じると終了する。
+Linux/macOS など pywebview を入れていない環境、または `--browser` を付けたときは、ブラウザで `http://127.0.0.1:8000/` を開く(ローカル専用。ポートが使用中なら 8001 以降。止めるには画面の「終了」ボタンか `Ctrl+C`)。
+WebView2 が使えない場合も、自動でブラウザ表示に切り替わる。`--no-ui` は画面を出さずにサーバーだけ起動する。データ(SQLite、取り込んだ画像、ログ)は、**アプリと同じフォルダの `data/`** に保存される(カレントディレクトリには依存しない。`fantracker/paths.py`)。
 Chart.js は `fantracker/static/` に同梱しており、オフラインで動く。
 
 - **取り込み**: 画像をドロップ → 読み取り値と切り抜きを確認・修正 → 確定(`POST /api/scan` → `POST /api/records` の2段階)
 - **ダッシュボード**: 総獲得ファン数の推移(折れ線)・日次増加量(棒)、期間切替、日割り補間(グラフと週次・月次集計の両方に反映)、PNG ダウンロード
+- **保存(CSV・グラフの PNG)**: 専用ウィンドウでは保存先を選ぶダイアログが出る(ブラウザ表示では通常のダウンロード)
 - **記録一覧**: 編集・削除・手動追加、履歴(同日の非採用)の表示、CSV エクスポート/インポート(UTF-8 BOM 付き。集計日が重複する場合は上書き/スキップを選択)
 
 集計日はゲームの日替わりに合わせて AM 5:00 区切り(`fantracker/dates.py`)。
@@ -76,6 +79,8 @@ scripts\windows\build_portable.bat
 - 使い方: zip を展開して `FanTracker.exe` を実行する。書き込める場所に置くこと(Program Files は不可)。
 - 引っ越し・バックアップ: フォルダごとコピーする。更新: 新しいフォルダへ、古い `data\` をコピーする。
 - 読み取り位置の調整: `data\layout.json` に書いたキーが、同梱の `layout.json` を上書きする。
-- ポート 8000 が使用中なら 8001 以降を使う(起動時の表示を参照)。
+- コンソールなしの exe(`console=False`)。起動エラーはメッセージボックスで表示し、ログは `data\logs\fantracker.log` に出る。専用ウィンドウを閉じると終了する。
+- 専用ウィンドウが開けない(WebView2 が無い等)ときは、ブラウザに切り替わり、画面右上の「終了」ボタンで止められる。`FanTracker.exe --browser` で、最初からブラウザ表示にもできる。
+- ビルド時の動作確認は `--no-ui`(画面なし)で行う。専用ウィンドウが開くことは、ビルド後に exe を起動して手動で確認する。
 - DB は `PRAGMA user_version` で版を管理する。新しい版のアプリで作ったデータを古いアプリで開くと、分かる形で止まる。
 - アイコンは `python scripts/make_icon.py` で `packaging/FanTracker.ico` を作り直せる。
