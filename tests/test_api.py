@@ -158,3 +158,14 @@ def test_static_pages_are_served(client):
     for path in ("/app.js", "/style.css", "/chart.umd.min.js"):
         assert client.get(path).status_code == 200
     assert client.get("/api/records").status_code == 200  # 静的配信が API を隠さない
+
+
+def test_db_connection_is_closed_on_shutdown(tmp_path):
+    """サーバー終了で DB を閉じる(Windows でデータフォルダを削除できるようにする)。"""
+    import sqlite3
+
+    app = create_app(tmp_path)
+    with TestClient(app) as c:  # with でライフスパンが動く
+        assert c.get("/api/records").status_code == 200
+    with pytest.raises(sqlite3.ProgrammingError):
+        app.state.store.conn.execute("SELECT 1")
