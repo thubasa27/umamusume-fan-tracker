@@ -81,6 +81,8 @@ scripts\windows\build_portable.bat
 `dist\FanTracker\`(exe と依存一式)と `dist\FanTracker-portable-v<バージョン>.zip` ができる。
 ビルドの最後に、できた exe を実際に起動して「画面が返る」「データが exe と同じフォルダに作られる」を確認する。
 配布物に `data\` は含めない。利用者向けの説明は `packaging/README-portable.txt`(zip 内では `README.txt`)。
+zip には、`README.txt`(使い方)、`LICENSE.txt`(利用許諾)、`THIRD_PARTY_NOTICES.txt`(第三者ソフトウェアのライセンス表記)も入る。
+zip と同じ場所に、受け取った人が確かめるための SHA-256(`…zip.sha256`、`sha256sum` 形式)も作る。
 
 - 使い方: zip を展開して `FanTracker.exe` を実行する。書き込める場所に置くこと(Program Files は不可)。
 - 引っ越し・バックアップ: フォルダごとコピーする。更新: 新しいフォルダへ、古い `data\` をコピーする。
@@ -116,3 +118,12 @@ scripts\windows\build_portable.bat
 - テスト: `tests/test_auth.py`(トークン、防御ヘッダー)、`tests/test_security.py`(Host、CSRF)、`tests/test_limits.py`(上限、CSV)、
   `tests/test_e2e.py`(実ブラウザで、別オリジンからの書き込み・DNS リバインディング・iframe への埋め込み・トークンなしの利用を再現)。
   防御を外すとテストが失敗することを、変異テストで確認している。
+
+## ライセンス
+
+- このソフト自体: [LICENSE](LICENSE)(作者から直接受け取った人が、個人の目的で、変更せずに使うことを許諾する。再配布・改変・営利利用は、作者の許可が必要)。
+- 同梱する第三者ソフトウェア(Chart.js、Pillow、NumPy、FastAPI、pywebview など): `THIRD_PARTY_NOTICES.txt`。
+  配布物のビルド時に、`scripts/make_notices.py` が、インストールされているパッケージのライセンス全文から作る(全文が見つからないと、ビルドが止まる)。
+  パッケージ管理の外にあるもの(Chart.js、@kurkle/color、WebView2 SDK、上流から補った `proxy-tools`)は `licenses/` に置いている。
+  **Chart.js(`fantracker/static/chart.umd.min.js`)や pywebview を更新したら、`scripts/make_notices.py` の `STATIC` の版と `licenses/` の全文も更新する**
+  (版がずれると、`tests/test_notices.py` が失敗する)。

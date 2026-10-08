@@ -38,6 +38,10 @@ $appDir = Join-Path $root 'dist\FanTracker'
 $exe = Join-Path $appDir 'FanTracker.exe'
 if (-not (Test-Path $exe)) { Stop-WithError "$exe ができていません。" }
 Copy-Item packaging\README-portable.txt (Join-Path $appDir 'README.txt') -Force
+Copy-Item LICENSE (Join-Path $appDir 'LICENSE.txt') -Force
+# 同梱する第三者ソフトウェアのライセンス表記(ライセンス全文が見つからないものがあれば、ここで止める)
+& $venvPy scripts\make_notices.py (Join-Path $appDir 'THIRD_PARTY_NOTICES.txt') --strict
+if ($LASTEXITCODE -ne 0) { Stop-WithError '第三者ライセンスの表記を作れませんでした(上のエラーを確認してください)。' }
 
 Write-Step '3. できた exe の動作確認'
 # 作業フォルダを別の場所にして起動し、データが exe と同じフォルダに作られることも確認する
@@ -70,9 +74,19 @@ for ($i = 0; $i -lt 20 -and (Test-Path $dataDir); $i++) {
 }
 if (Test-Path $dataDir) { Stop-WithError "動作確認で作られたデータを削除できません(使用中の可能性があります): $dataDir`n FanTracker.exe が残っていないか確認して、もう一度実行してください。" }
 
+foreach ($f in 'README.txt', 'LICENSE.txt', 'THIRD_PARTY_NOTICES.txt', 'FanTracker.exe') {
+    if (-not (Test-Path (Join-Path $appDir $f))) { Stop-WithError "$f が配布物にありません。" }
+}
+
 Write-Step '4. zip の作成'
 $zip = Join-Path $root "dist\FanTracker-portable-v$version.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
 Compress-Archive -Path $appDir -DestinationPath $zip
 Write-Host "できました: $zip" -ForegroundColor Green
+# 受け取った人が、zip が改ざん・破損していないか確かめられるよう、SHA-256 を添える(sha256sum 形式)
+$hash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLower()
+$hashFile = "$zip.sha256"
+[IO.File]::WriteAllText($hashFile, "$hash *$(Split-Path -Leaf $zip)`n", (New-Object Text.UTF8Encoding($false)))
+Write-Host "SHA-256: $hash" -ForegroundColor Green
+Write-Host "         $hashFile"
 Write-Host "最後に、dist\FanTracker\FanTracker.exe をダブルクリックして、専用ウィンドウが開くことを確認してください。" -ForegroundColor Yellow
