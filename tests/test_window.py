@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from fantracker import __main__ as entry
-from fantracker import paths, window
+from fantracker import paths, security, window
 
 
 class FakeWindow:
@@ -93,10 +93,14 @@ def test_real_pywebview_has_the_api_we_use():
 
 # ---- 起動の流れ(実サーバー + 偽のウィンドウ) ----
 
+TOKEN = "test-token-" + "x" * 32
+
+
 @pytest.fixture
 def launch(monkeypatch, tmp_path):
     """main() を別スレッドで動かす。返り値: (起動, 結果の dict)。"""
     monkeypatch.setattr(paths, "data_dir", lambda: tmp_path / "data")
+    monkeypatch.setattr(entry, "new_token", lambda: TOKEN)
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
@@ -125,13 +129,25 @@ def launch(monkeypatch, tmp_path):
         t.join(15)
 
 
+def authed(port):
+    """画面と同じ条件(認証の Cookie とヘッダー)のクライアント。"""
+    c = httpx.Client(base_url=f"http://127.0.0.1:{port}", headers={"X-FanTracker": "1"}, timeout=2)
+    c.cookies.set(security.cookie_name(f"127.0.0.1:{port}"), TOKEN)
+    return c
+
+
 def wait_http(port):
     for _ in range(100):
         try:
-            return httpx.get(f"http://127.0.0.1:{port}/api/info", timeout=2).json()
+            if httpx.get(f"http://127.0.0.1:{port}/api/health", timeout=2).status_code == 200:
+                return authed(port).get("/api/info").json()
         except httpx.HTTPError:
             time.sleep(0.1)
     raise AssertionError("サーバーが応答しません")
+
+
+def shutdown(port):
+    return authed(port).post("/api/shutdown")
 
 
 def test_browser_mode_has_shutdown_and_requires_header(launch):
@@ -140,18 +156,32 @@ def test_browser_mode_has_shutdown_and_requires_header(launch):
     info = wait_http(result["port"])
     assert info["mode"] == "browser" and info["can_shutdown"] is True
     url = f"http://127.0.0.1:{result['port']}/api/shutdown"
-    assert httpx.post(url).status_code == 403  # 他のサイトからの単純なリクエストでは止められない
-    assert httpx.post(url, headers={"X-FanTracker": "1"}).json() == {"ok": True}
+    no_header = httpx.Client(cookies={security.cookie_name(f"127.0.0.1:{result['port']}"): TOKEN})
+    assert no_header.post(url).status_code == 403  # 他のサイトからの単純なリクエストでは止められない
+    assert httpx.post(url, headers={"X-FanTracker": "1"}).status_code == 403  # Cookie(トークン)もなければ止められない
+    assert shutdown(result["port"]).json() == {"ok": True}
     t.join(15)
     assert not t.is_alive() and result["exit"] == 0
-    assert result["opened"] == [f"http://127.0.0.1:{result['port']}/"]
+    # ブラウザには、トークン付きの URL を渡す
+    assert result["opened"] == [f"http://127.0.0.1:{result['port']}/?t={TOKEN}"]
+
+
+def test_token_is_not_printed_or_logged(launch, capsys, tmp_path):
+    start, result = launch
+    t = start(["--no-ui"])
+    wait_http(result["port"])
+    shutdown(result["port"])
+    t.join(15)
+    out = capsys.readouterr()
+    log_text = (tmp_path / "data" / "logs" / "fantracker.log").read_text(encoding="utf-8")
+    assert TOKEN not in out.out + out.err + log_text
 
 
 def test_no_ui_opens_nothing(launch):
     start, result = launch
     t = start(["--no-ui"])
     wait_http(result["port"])
-    httpx.post(f"http://127.0.0.1:{result['port']}/api/shutdown", headers={"X-FanTracker": "1"})
+    shutdown(result["port"])
     t.join(15)
     assert result["opened"] == [] and result["exit"] == 0
 
@@ -162,18 +192,23 @@ def test_window_mode_runs_until_window_closes_then_stops_server(launch, monkeypa
 
     def fake_run_window(url, version):
         seen["url"] = url
-        seen["info"] = httpx.get(url + "api/info").json()
-        seen["index"] = httpx.get(url).status_code
+        seen["first"] = httpx.get(url, follow_redirects=False)  # トークン付きの URL(Cookie に替えて、URL から消すリダイレクト)
+        client = httpx.Client(base_url=url.split("?")[0])
+        client.get(url, follow_redirects=True)  # ウィンドウと同じく、Cookie を受け取る
+        seen["info"] = client.get("api/info").json()
+        seen["index"] = client.get("").status_code
 
     monkeypatch.setattr(window, "is_available", lambda: True)
     monkeypatch.setattr(window, "run_window", fake_run_window)
     t = start([])
     t.join(15)
     assert not t.is_alive() and result["exit"] == 0
+    assert seen["url"].endswith(f"/?t={TOKEN}")
+    assert seen["first"].status_code == 303 and "t=" not in seen["first"].headers["location"]
     assert seen["info"]["mode"] == "window" and seen["info"]["can_shutdown"] is False  # 閉じれば終了するので不要
     assert seen["index"] == 200 and result["opened"] == []
     with pytest.raises(httpx.HTTPError):  # ウィンドウを閉じたらサーバーも止まっている
-        httpx.get(seen["url"] + "api/info", timeout=1)
+        httpx.get(f"http://127.0.0.1:{result['port']}/api/health", timeout=1)
 
 
 def test_window_failure_falls_back_to_browser_with_quit_button(launch, monkeypatch):
@@ -189,9 +224,10 @@ def test_window_failure_falls_back_to_browser_with_quit_button(launch, monkeypat
     while not result["opened"] and time.time() < deadline:
         time.sleep(0.1)
     assert result["opened"], "ブラウザに切り替わっていない"
+    assert result["opened"][0].endswith(f"/?t={TOKEN}")
     info = wait_http(result["port"])
     assert info["mode"] == "browser" and info["can_shutdown"] is True
-    httpx.post(f"http://127.0.0.1:{result['port']}/api/shutdown", headers={"X-FanTracker": "1"})
+    shutdown(result["port"])
     t.join(15)
     assert result["exit"] == 0
 
@@ -214,6 +250,15 @@ def test_unexpected_error_is_shown_with_log_path(launch, monkeypatch):
     monkeypatch.setattr(entry, "create_app", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("壊れたデータ")))
     start(["--no-ui"]).join(15)
     assert result["exit"] == 1 and "壊れたデータ" in shown[0] and "fantracker.log" in shown[0]
+
+
+def test_server_header_is_hidden(launch):
+    start, result = launch
+    t = start(["--no-ui"])
+    wait_http(result["port"])
+    assert "server" not in httpx.get(f"http://127.0.0.1:{result['port']}/api/health").headers
+    shutdown(result["port"])
+    t.join(15)
 
 
 def test_parse_args_flags_are_exclusive():

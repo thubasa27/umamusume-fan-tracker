@@ -15,13 +15,14 @@ from pathlib import Path
 
 import uvicorn
 
-from . import __version__, paths, window
+from . import __version__, paths, security, window
 from .api import create_app
 
 HOST = "127.0.0.1"  # 外部に公開しない(ローカル専用)
 PORT = 8000
 PORT_TRIES = 20  # 8000 が使用中なら 8001, 8002, … を試す
 START_TIMEOUT = 15  # サーバーが起動するまで待つ秒数
+new_token = security.new_token  # テストで差し替える
 
 log = logging.getLogger("fantracker")
 
@@ -93,14 +94,16 @@ def _run(args: argparse.Namespace) -> None:
 
     port = pick_port()
     url = f"http://{HOST}:{port}/"
+    token = new_token()
+    open_url = f"{url}?{security.TOKEN_PARAM}={token}"  # 最初に開く URL だけがトークンを持つ(画面を開くと Cookie に替わり、URL から消える)
     server: uvicorn.Server
 
     def request_shutdown() -> None:
         server.should_exit = True
 
     use_window = not args.browser and not args.no_ui and window.is_available()
-    app = create_app(data, mode="window" if use_window else "browser", on_shutdown=request_shutdown)
-    server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=port, log_config=None))
+    app = create_app(data, mode="window" if use_window else "browser", on_shutdown=request_shutdown, token=token)
+    server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=port, log_config=None, server_header=False))
     thread = threading.Thread(target=server.run, name="uvicorn", daemon=True)
     thread.start()
     deadline = time.time() + START_TIMEOUT
@@ -113,7 +116,7 @@ def _run(args: argparse.Namespace) -> None:
 
     if use_window:
         try:
-            window.run_window(url, __version__)  # ウィンドウが閉じられるまで戻らない
+            window.run_window(open_url, __version__)  # ウィンドウが閉じられるまで戻らない
             server.should_exit = True
             thread.join(10)
             return
@@ -121,7 +124,7 @@ def _run(args: argparse.Namespace) -> None:
             log.exception("専用ウィンドウを開けませんでした。ブラウザで開きます")
             app.state.mode = "browser"
     if not args.no_ui:
-        webbrowser.open(url)
+        webbrowser.open(open_url)
         print("停止は、画面の「終了」ボタン、または Ctrl+C です。")
     _wait_until_stopped(server, thread)
 

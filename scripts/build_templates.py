@@ -5,6 +5,10 @@
 「人」だけは総獲得数の行にしか無いので、sample_1 の末尾から取る。
 
     python scripts/build_templates.py
+
+元の画像(ゲームのスクリーンショット)はリポジトリに含めない。再生成するときは、手元の画像を
+tests/fixtures/local/sample_1.jpg に置く(tests/fixtures/local/ は .gitignore で除外)。
+できた fantracker/templates.npz(文字の小さなビットマップ)だけを、リポジトリに含める。
 """
 from pathlib import Path
 
@@ -14,7 +18,7 @@ from PIL import Image
 from fantracker import ocr
 
 ROOT = Path(__file__).resolve().parent.parent
-SAMPLE = ROOT / "tests" / "fixtures" / "sample_1.jpg"
+SAMPLE = ROOT / "tests" / "fixtures" / "local" / "sample_1.jpg"  # 実際のスクリーンショット(リポジトリには含めない)
 
 # 基準解像度(1625x914)での各行の中心 y と、その行に表示されている文字列
 ROWS = [
@@ -42,6 +46,8 @@ def extract(img: Image.Image, cy: int, label: str):
 
 
 def main() -> None:
+    if not SAMPLE.exists():
+        raise SystemExit(f"元の画像がありません: {SAMPLE}\n実際のスクリーンショットを、この場所に置いてください(リポジトリには含めません)。")
     img = Image.open(SAMPLE).convert("RGB")
     samples: dict[str, list[np.ndarray]] = {}
     for cy, label in ROWS:

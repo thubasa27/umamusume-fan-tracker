@@ -4,35 +4,38 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
-from . import __version__, anomaly, csvio, dates, ocr, paths, summary
+from . import __version__, anomaly, csvio, dates, ocr, paths, security, summary
 from .db import DuplicateImage, Store
+from .limits import (
+    HASH_PATTERN, MAX_CSV_BYTES, MAX_FAN_TOTAL, MAX_FILENAME, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_SCAN_FILES,
+)
 
 IMAGE_SUFFIXES = {"JPEG": ".jpg", "PNG": ".png"}
 log = logging.getLogger("fantracker")
 
 
 class RecordIn(BaseModel):
-    fan_total: int = Field(gt=0)
+    fan_total: int = Field(gt=0, le=MAX_FAN_TOTAL)
     captured_at: datetime
     business_date: date | None = None  # 省略時は captured_at から AM 5:00 区切りで決める
-    filename: str | None = None
-    image_hash: str | None = None
+    filename: str | None = Field(default=None, max_length=MAX_FILENAME)
+    image_hash: str | None = Field(default=None, pattern=HASH_PATTERN)
     manual: bool = False  # 読み取り値や日付を利用者が修正した
 
 
 class RecordPatch(BaseModel):
-    fan_total: int | None = Field(default=None, gt=0)
+    fan_total: int | None = Field(default=None, gt=0, le=MAX_FAN_TOTAL)
     captured_at: datetime | None = None
     business_date: date | None = None
 
@@ -41,10 +44,13 @@ def create_app(
     data_dir: Path | str | None = None,
     mode: str = "browser",
     on_shutdown: Callable[[], None] | None = None,
+    allowed_hosts: Iterable[str] = security.DEFAULT_ALLOWED_HOSTS,
+    token: str | None = None,
 ) -> FastAPI:
     """data_dir 省略時は実行ファイルと同じフォルダの data/(fantracker.paths.data_dir)。
 
     mode は "window"(専用ウィンドウ)か "browser"(ブラウザ)。on_shutdown は、ブラウザ表示の「終了」ボタンで呼ぶ。
+    token は、起動ごとの認証用トークン(省略時は自動で作り、`app.state.token` に入れる)。
     """
     data_dir = Path(data_dir) if data_dir else paths.data_dir()
     image_dir = data_dir / "images"
@@ -59,6 +65,12 @@ def create_app(
     app = FastAPI(title="ウマ娘 ファン数トラッカー", lifespan=lifespan)
     app.state.store = store
     app.state.mode = mode
+    app.state.token = token or security.new_token()
+    security.install(app, app.state.token, allowed_hosts)  # 他サイト・他のユーザーからのアクセスを拒否
+
+    @app.get("/api/health")
+    def health():
+        return {"ok": True}  # 認証なし。起動の確認用(何も返さない)
 
     @app.get("/api/info")
     def info():
@@ -66,12 +78,10 @@ def create_app(
         return {"version": __version__, "mode": app.state.mode, "can_shutdown": browser and on_shutdown is not None}
 
     @app.post("/api/shutdown")
-    def shutdown(request: Request):
-        """ブラウザ表示のときの終了。カスタムヘッダー必須(他のサイトからの単純なリクエストでは止められない)。"""
+    def shutdown():
+        """ブラウザ表示のときの終了(X-FanTracker ヘッダーの確認は security のミドルウェアが行う)。"""
         if app.state.mode != "browser" or on_shutdown is None:
             raise HTTPException(404)
-        if request.headers.get("x-fantracker") != "1":
-            raise HTTPException(403, "X-FanTracker ヘッダーが必要です")
         log.info("終了が要求されました")
         on_shutdown()
         return {"ok": True}
@@ -84,20 +94,31 @@ def create_app(
     @app.post("/api/scan")
     async def scan(files: list[UploadFile] = File(...), last_modified_ms: list[int] = Form(default=[])):
         """画像を読み取って結果を返す(DB には登録しない)。`last_modified_ms` は files と同順。"""
+        if len(files) > MAX_SCAN_FILES:
+            raise HTTPException(413, f"一度に読み取れるのは {MAX_SCAN_FILES} 枚までです")
         results = []
         for i, f in enumerate(files):
-            data = await f.read()
+            data = await f.read(MAX_IMAGE_BYTES + 1)  # 上限を超える分は読まない
+            name = (f.filename or "")[:MAX_FILENAME]
+            if len(data) > MAX_IMAGE_BYTES:
+                log.warning("ファイルが大きすぎます: %r", name)
+                results.append({"filename": name, "error": f"ファイルが大きすぎます(上限 {MAX_IMAGE_BYTES // 1024 // 1024}MB)"})
+                continue
             image_hash = hashlib.sha256(data).hexdigest()
             item: dict = {"filename": f.filename, "image_hash": image_hash}
             try:
-                img = Image.open(io.BytesIO(data))
+                img = Image.open(io.BytesIO(data))  # ヘッダーだけ読む(画素は読み込まない)
+                if img.width * img.height > MAX_IMAGE_PIXELS:
+                    log.warning("画像が大きすぎます: %r (%dx%d)", name, img.width, img.height)
+                    results.append({**item, "error": f"画像が大きすぎます(上限 {MAX_IMAGE_PIXELS // 1_000_000} メガピクセル)"})
+                    continue
                 img.load()
-            except (UnidentifiedImageError, OSError):
-                log.warning("画像として読み込めません: %s", f.filename)
+            except (UnidentifiedImageError, OSError, Image.DecompressionBombError):
+                log.warning("画像として読み込めません: %r", name)
                 results.append({**item, "error": "画像として読み込めません"})
                 continue
             if img.format not in IMAGE_SUFFIXES:
-                log.warning("PNG/JPG 以外は取り込めません: %s (%s)", f.filename, img.format)
+                log.warning("PNG/JPG 以外は取り込めません: %r (%s)", name, img.format)
                 results.append({**item, "error": "PNG/JPG 以外は取り込めません"})
                 continue
 
@@ -124,7 +145,7 @@ def create_app(
                     store.list(), dates.business_date(captured_at), read.value
                 )
             if item["warnings"]:  # NFR-6: 読み取りの失敗・警告をログに残す
-                log.warning("読み取り警告 %s (読取値=%s): %s", f.filename, read.value, " / ".join(item["warnings"]))
+                log.warning("読み取り警告 %r (読取値=%s): %s", name, read.value, " / ".join(item["warnings"]))
             results.append(item)
         return {"results": results}
 
@@ -199,7 +220,10 @@ def create_app(
         """mode: report=登録せず衝突を報告 / skip=集計日が重複する行を飛ばす / overwrite=重複する集計日の既存記録を置き換える。"""
         if mode not in {"report", "skip", "overwrite"}:
             raise HTTPException(422, "mode は report / skip / overwrite のいずれか")
-        rows, errors = csvio.parse_csv(await file.read())
+        raw = await file.read(MAX_CSV_BYTES + 1)
+        if len(raw) > MAX_CSV_BYTES:
+            raise HTTPException(413, f"CSV が大きすぎます(上限 {MAX_CSV_BYTES // 1024 // 1024}MB)")
+        rows, errors = csvio.parse_csv(raw)
         existing_dates = {r["business_date"] for r in store.list(include_history=True)}
         conflicts = sorted({r["business_date"].isoformat() for r in rows} & existing_dates)
         result = {"rows": len(rows), "errors": errors, "conflict_dates": conflicts,

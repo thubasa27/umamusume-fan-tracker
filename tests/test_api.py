@@ -1,21 +1,18 @@
-from pathlib import Path
-
 import pytest
-from fastapi.testclient import TestClient
 
 from fantracker.api import create_app
+import synthetic
+from helpers import make_client
 
-FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture
 def client(tmp_path):
-    return TestClient(create_app(tmp_path))
+    return make_client(create_app(tmp_path))
 
 
 def scan(client, name, upload_name):
-    with open(FIXTURES / name, "rb") as f:
-        r = client.post("/api/scan", files=[("files", (upload_name, f, "image/jpeg"))])
+    r = client.post("/api/scan", files=[("files", (upload_name, synthetic.sample_bytes(name), "image/jpeg"))])
     assert r.status_code == 200
     return r.json()["results"][0]
 
@@ -127,7 +124,7 @@ def test_csv_export_matches_table_and_roundtrips(client, tmp_path):
     assert len(rows) == 4 and first["business_date"] == "2026-10-05"
 
     # 別のデータ領域に取り込み直すと同じ記録になる
-    other = TestClient(create_app(tmp_path / "other"))
+    other = make_client(create_app(tmp_path / "other"))
     r = other.post("/api/import/csv", files={"file": ("x.csv", raw)}, data={"mode": "report"}).json()
     assert r["rows"] == 4 and r["errors"] == [] and r["conflict_dates"] == []
     r = other.post("/api/import/csv", files={"file": ("x.csv", raw)}, data={"mode": "skip"}).json()
@@ -167,7 +164,7 @@ def test_db_connection_is_closed_on_shutdown(tmp_path):
     import sqlite3
 
     app = create_app(tmp_path)
-    with TestClient(app) as c:  # with でライフスパンが動く
+    with make_client(app) as c:  # with でライフスパンが動く
         assert c.get("/api/records").status_code == 200
     with pytest.raises(sqlite3.ProgrammingError):
         app.state.store.conn.execute("SELECT 1")
