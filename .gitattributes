@@ -1,0 +1,18 @@
+# 改行コードを固定する。リポジトリには LF で保存し、作業ツリーでは下の指定にする。
+# Windows の core.autocrlf の設定に左右されず、同じコミットから、同じ内容の配布物ができる。
+* text=auto eol=lf
+
+# Windows のスクリプトと、利用者が Windows のメモ帳で開く文書は、CRLF
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+LICENSE text eol=crlf
+packaging/README-portable.txt text eol=crlf
+
+# バイナリ(改行の変換や差分の対象にしない)
+*.npz binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.zip binary
