@@ -71,6 +71,9 @@ def test_import_confirm_dashboard_records_flow(page):
 
     page.click("nav button[data-tab=dashboard]")
     page.wait_for_selector("#tbl-daily tbody tr")
+    page.uncheck("#interpolate")
+    page.select_option("#period", "all")
+    page.wait_for_function("document.querySelectorAll('#tbl-daily tbody tr').length === 3")
     rows = page.locator("#tbl-daily tbody tr").all_inner_texts()
     assert len(rows) == 3 and "2,672,583,581" in rows[0]
     assert "2日分の合計" not in "".join(rows)  # 10/5, 10/6, 10/7 は連続
@@ -89,6 +92,7 @@ def test_import_confirm_dashboard_records_flow(page):
     page.click("#manual-form button")
     page.wait_for_selector("#manual-msg.ok")
     page.click("nav button[data-tab=dashboard]")
+    page.uncheck("#interpolate")
     page.wait_for_function("document.querySelectorAll('#tbl-daily tbody tr').length === 4")
     assert "3日分の合計" in page.locator("#tbl-daily tbody tr").first.inner_text()
     page.check("#interpolate")
@@ -127,3 +131,9 @@ def test_csv_import_panel_flow(page, tmp_path):
 def test_empty_dashboard_message(page):
     page.click("nav button[data-tab=dashboard]")
     page.wait_for_selector("#dash-empty:not([hidden])")
+
+
+def test_dashboard_defaults_to_30_days_with_interpolation(page):
+    page.click("nav button[data-tab=dashboard]")
+    assert page.input_value("#period") == "30"
+    assert page.is_checked("#interpolate")

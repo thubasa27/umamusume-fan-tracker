@@ -34,11 +34,11 @@
       <label>期間
         <select id="period">
           <option value="7">直近7日</option>
-          <option value="30">直近30日</option>
-          <option value="all" selected>全期間</option>
+          <option value="30" selected>直近30日</option>
+          <option value="all">全期間</option>
         </select>
       </label>
-      <label><input type="checkbox" id="interpolate"> 欠損日を日割り補間する</label>
+      <label><input type="checkbox" id="interpolate" checked> 欠損日を日割り補間する</label>
     </div>
     <p id="dash-empty" hidden>記録がまだありません。「取り込み」から追加してください。</p>
     <div id="dash-body">
