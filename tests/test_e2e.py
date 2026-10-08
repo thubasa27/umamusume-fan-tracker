@@ -9,9 +9,13 @@ import uvicorn
 
 pw = pytest.importorskip("playwright.sync_api")
 
+from fantracker import security  # noqa: E402
 from fantracker.api import create_app  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+TOKENS = {}  # サーバーの URL → 認証トークン(画面は、トークン付きの URL を開いて Cookie を受け取る)
 
 
 def serve(app):
@@ -23,6 +27,7 @@ def serve(app):
     t.start()
     while not srv.started:
         time.sleep(0.05)
+    TOKENS[f"http://127.0.0.1:{port}"] = app.state.token
     yield f"http://127.0.0.1:{port}", srv
     srv.should_exit = True
     t.join(5)
@@ -48,6 +53,22 @@ def page(server):
     yield from open_page(server)
 
 
+def wait_js(pg, expression, timeout=10):
+    """式が真になるまで、Python 側から繰り返し評価する。
+    page.wait_for_function は文字列を eval で評価するため、unsafe-eval を許可しない CSP(アプリの防御ヘッダー)に止められる。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if pg.evaluate(expression):
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"条件を満たしませんでした: {expression}")
+
+
+def open_url(server):
+    """アプリが最初に開く URL(トークン付き。開くと Cookie に替わり、URL から消える)。"""
+    return f"{server}/?t={TOKENS[server]}"
+
+
 def open_page(server, init_script=None):
     with pw.sync_playwright() as p:
         try:
@@ -59,7 +80,10 @@ def open_page(server, init_script=None):
             pg.add_init_script(init_script)
         errors = []
         pg.on("pageerror", lambda e: errors.append(str(e)))
-        pg.goto(server)
+        # 防御ヘッダー(CSP)でアプリ自体が壊れていないこと: 違反はコンソールのエラーとして報告される
+        pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        pg.goto(open_url(server))
+        assert "t=" not in pg.url  # トークンは URL から消えている
         yield pg
         assert errors == []
         browser.close()
@@ -69,13 +93,13 @@ def upload(page, *pairs):
     """(フィクスチャ名, アップロード時のファイル名) を取り込みタブから読み込む。"""
     files = [{"name": up, "mimeType": "image/jpeg", "buffer": (FIXTURES / src).read_bytes()} for src, up in pairs]
     page.set_input_files("#file-input", files)
-    page.wait_for_function("document.querySelector('#scan-status').textContent.includes('件を読み取りました')")
+    wait_js(page, "document.querySelector('#scan-status').textContent.includes('件を読み取りました')")
 
 
 def test_import_confirm_dashboard_records_flow(page):
     upload(page, ("sample_3.jpg", "20261005200000_1.jpg"), ("sample_2.jpg", "20261006200000_1.jpg"),
            ("sample_1.jpg", "20261008030000_1.jpg"))  # 3枚目は AM5:00 前なので 10/7 分
-    page.wait_for_function("document.querySelectorAll('#scan-results .item').length === 3")
+    wait_js(page, "document.querySelectorAll('#scan-results .item').length === 3")
     values = [i.input_value() for i in page.locator("#scan-results .item input[type=text]").all()]
     assert values == ["2654906664", "2658611645", "2672583581"]
     assert "集計日 2026-10-07" in page.locator("#scan-results .item").nth(2).inner_text()
@@ -83,7 +107,7 @@ def test_import_confirm_dashboard_records_flow(page):
     assert "null" not in page.locator("#scan-results").inner_text()
 
     page.click("#confirm-all")
-    page.wait_for_function("document.querySelectorAll('#scan-results .ok').length === 3")
+    wait_js(page, "document.querySelectorAll('#scan-results .ok').length === 3")
 
     # 同じ画像を再取り込みすると登録済み扱い
     upload(page, ("sample_1.jpg", "20261008030000_1.jpg"))
@@ -93,7 +117,7 @@ def test_import_confirm_dashboard_records_flow(page):
     page.wait_for_selector("#tbl-daily tbody tr")
     page.uncheck("#interpolate")
     page.select_option("#period", "all")
-    page.wait_for_function("document.querySelectorAll('#tbl-daily tbody tr').length === 3")
+    wait_js(page, "document.querySelectorAll('#tbl-daily tbody tr').length === 3")
     rows = page.locator("#tbl-daily tbody tr").all_inner_texts()
     assert len(rows) == 3 and "2,672,583,581" in rows[0]
     assert "2日分の合計" not in "".join(rows)  # 10/5, 10/6, 10/7 は連続
@@ -113,10 +137,10 @@ def test_import_confirm_dashboard_records_flow(page):
     page.wait_for_selector("#manual-msg.ok")
     page.click("nav button[data-tab=dashboard]")
     page.uncheck("#interpolate")
-    page.wait_for_function("document.querySelectorAll('#tbl-daily tbody tr').length === 4")
+    wait_js(page, "document.querySelectorAll('#tbl-daily tbody tr').length === 4")
     assert "3日分の合計" in page.locator("#tbl-daily tbody tr").first.inner_text()
     page.check("#interpolate")
-    page.wait_for_function("document.querySelectorAll('#tbl-daily tbody tr').length === 6")
+    wait_js(page, "document.querySelectorAll('#tbl-daily tbody tr').length === 6")
     assert page.locator("#tbl-daily tbody tr", has_text="補間").count() == 2
 
     # 記録一覧: 編集と削除
@@ -130,7 +154,7 @@ def test_import_confirm_dashboard_records_flow(page):
     assert "○" in page.locator("#tbl-records tbody tr").last.inner_text()  # 手修正フラグ
     page.on("dialog", lambda dlg: dlg.accept())
     page.locator("#tbl-records tbody tr").last.get_by_text("削除").click()
-    page.wait_for_function("document.querySelectorAll('#tbl-records tbody tr').length === 3")
+    wait_js(page, "document.querySelectorAll('#tbl-records tbody tr').length === 3")
 
 
 def test_csv_import_panel_flow(page, tmp_path):
@@ -177,7 +201,7 @@ def test_native_save_for_csv_and_chart_png(server):
         pg.wait_for_selector("#manual-msg.ok")
 
         pg.click("#export-link")  # ダウンロードではなく保存ダイアログ経由になる
-        pg.wait_for_function("window.__saved.length === 1")
+        wait_js(pg, "window.__saved.length === 1")
         saved = pg.evaluate("window.__saved[0]")
         assert saved["name"] == "fan_records.csv"
         assert base64.b64decode(saved["b64"]).startswith(b"\xef\xbb\xbfbusiness_date")
@@ -186,7 +210,7 @@ def test_native_save_for_csv_and_chart_png(server):
         pg.click("nav button[data-tab=dashboard]")
         pg.wait_for_selector("#tbl-daily tbody tr")
         pg.click("button.dl[data-chart=chart-total]")
-        pg.wait_for_function("window.__saved.length === 2")
+        wait_js(pg, "window.__saved.length === 2")
         png = pg.evaluate("window.__saved[1]")
         assert png["name"] == "fan_total.png" and base64.b64decode(png["b64"])[:8] == b"\x89PNG\r\n\x1a\n"
 
@@ -212,13 +236,15 @@ def test_quit_button_stops_the_app_in_browser_mode(server_with_quit):
 # ---- 他サイトからの攻撃を、実ブラウザで再現する ----
 
 def attack_page(server, extra_args=None):
-    """攻撃者のページ(別オリジン)に見立てた Chromium のページ。`evil.test` を 127.0.0.1 に向けて DNS リバインディングも再現する。"""
+    """被害者のブラウザ(アプリを開いて、認証の Cookie を持っている)のページ。`evil.test` を 127.0.0.1 に向けて DNS リバインディングも再現する。"""
     with pw.sync_playwright() as p:
         try:
             browser = p.chromium.launch(args=["--host-resolver-rules=MAP evil.test 127.0.0.1"] + (extra_args or []))
         except Exception as e:
             pytest.skip(f"chromium を起動できません: {e}")
-        yield browser.new_page()
+        pg = browser.new_page()
+        pg.goto(open_url(server))  # 被害者はアプリを開いていて、127.0.0.1 の Cookie を持っている
+        yield pg
         browser.close()
 
 
@@ -266,12 +292,16 @@ def test_cross_site_form_post_cannot_write_in_real_browser(server, attacker_site
     import json
     import urllib.request
 
+    port = server.rsplit(":", 1)[1]
+
     for pg in attack_page(server):
         pg.goto(attacker_site)  # 別オリジン(evil.test)のページから、アプリ(127.0.0.1)へ送る
         assert pg.evaluate("location.origin") != server
         result = pg.evaluate(ATTACK_JS, server)
         assert "header" in result  # カスタムヘッダー付きは、ブラウザ側(プリフライト)で止まる
-    with urllib.request.urlopen(f"{server}/api/records?include_history=true") as r:
+    req = urllib.request.Request(f"{server}/api/records?include_history=true",
+                                 headers={"Cookie": f"{security.cookie_name('127.0.0.1:' + port)}={TOKENS[server]}"})
+    with urllib.request.urlopen(req) as r:
         assert json.load(r) == []  # 何も書き込まれていない
 
 
@@ -279,7 +309,8 @@ def test_dns_rebinding_cannot_read_data_in_real_browser(server):
     port = server.rsplit(":", 1)[1]
     import urllib.request
     req = urllib.request.Request(f"{server}/api/records", data=b'{"fan_total": 123456, "captured_at": "2026-10-05T20:00:00"}',
-                                 headers={"Content-Type": "application/json", "X-FanTracker": "1"}, method="POST")
+                                 headers={"Content-Type": "application/json", "X-FanTracker": "1",
+                                          "Cookie": f"{security.cookie_name('127.0.0.1:' + port)}={TOKENS[server]}"}, method="POST")
     urllib.request.urlopen(req).read()  # 正規の記録を1件入れておく
     for pg in attack_page(server):
         # evil.test が 127.0.0.1 を指す(DNS リバインディング)。同一オリジンになるので、ブラウザ側の制限は効かない
@@ -290,3 +321,46 @@ def test_dns_rebinding_cannot_read_data_in_real_browser(server):
         assert status == 403
         # 正規のアドレスなら、同じページから読める(対策が正規の利用を妨げない)
         assert pg.goto(f"http://127.0.0.1:{port}/api/records").status == 200
+
+
+def test_browser_without_the_token_cannot_use_the_app(server):
+    """トークンを知らないブラウザ(同じ PC の別のユーザーなど)は、画面も API も使えない。"""
+    with pw.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch()
+        except Exception as e:
+            pytest.skip(f"chromium を起動できません: {e}")
+        pg = browser.new_page()
+        resp = pg.goto(server + "/")
+        assert resp.status == 403 and "起動したとき" in pg.inner_text("body")
+        assert pg.evaluate("async () => (await fetch('/api/records')).status") == 403
+        assert pg.evaluate("async () => (await fetch('/api/health')).status") == 200  # 起動の確認用だけは認証なし
+        pg.goto(f"{server}/?t=wrong-token")
+        assert "403" in str(pg.evaluate("async () => (await fetch('/api/records')).status"))
+        # 正しいトークンを渡すと使える
+        assert pg.goto(open_url(server)).status == 200
+        assert pg.evaluate("async () => (await fetch('/api/records')).status") == 200
+        browser.close()
+
+
+def test_page_cannot_be_framed_by_another_site(server, attacker_site):
+    """クリックジャッキング対策(frame-ancestors / X-Frame-Options)。
+
+    認証が要る画面は、SameSite=Strict の Cookie が iframe には送られないので、そもそも表示されない。防御ヘッダーだけを確かめるため、
+    認証なしで応答する /api/health を iframe に入れて、ブラウザが表示を拒否することを確認する。"""
+    port = server.rsplit(":", 1)[1]
+    for pg in attack_page(server):
+        pg.goto(attacker_site)
+        pg.evaluate(
+            """(url) => new Promise((resolve) => {
+              const f = document.createElement("iframe");
+              f.src = url;
+              f.onload = () => resolve(true);
+              document.body.append(f);
+              setTimeout(() => resolve(false), 5000);
+            })""",
+            f"http://127.0.0.1:{port}/api/health",
+        )
+        frames = [f for f in pg.frames if f != pg.main_frame]
+        assert frames, "iframe が作られていない"
+        assert '"ok"' not in frames[0].content()  # 表示を拒否されている(拒否されなければ {"ok":true} が表示される)

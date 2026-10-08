@@ -21,6 +21,7 @@ import uvicorn
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from fantracker import security  # noqa: E402
 from fantracker.api import create_app  # noqa: E402
 
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -39,11 +40,12 @@ def check(ok: bool, label: str, detail: str = "") -> None:
     print(f"  [{'OK' if ok else 'NG'}] {label}" + (f"  ({detail})" if detail and not ok else ""))
 
 
-def start_server(data_dir: str) -> tuple[uvicorn.Server, threading.Thread, str]:
+def start_server(data_dir: str) -> tuple[uvicorn.Server, threading.Thread, str, str]:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(create_app(data_dir), host="127.0.0.1", port=port, log_level="warning"))
+    app = create_app(data_dir)
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     deadline = time.time() + 15
@@ -51,7 +53,7 @@ def start_server(data_dir: str) -> tuple[uvicorn.Server, threading.Thread, str]:
         if time.time() > deadline:
             raise SystemExit("サーバーを起動できませんでした")
         time.sleep(0.05)
-    return server, thread, f"http://127.0.0.1:{port}"
+    return server, thread, f"http://127.0.0.1:{port}", app.state.token
 
 
 def scan(c: httpx.Client, fixture: str, upload_name: str) -> dict:
@@ -66,8 +68,20 @@ def confirm(c: httpx.Client, item: dict, **over) -> httpx.Response:
     return c.post("/api/records", json=body)
 
 
-def run(base: str) -> None:
-    with httpx.Client(base_url=base, timeout=30, headers={"X-FanTracker": "1"}) as c:
+def run(base: str, token: str) -> None:
+    name = security.cookie_name(base.removeprefix("http://"))
+    with httpx.Client(base_url=base, timeout=30, headers={"X-FanTracker": "1"}, cookies={name: token}) as c:
+        print("0. 認証と防御ヘッダー")
+        bare = httpx.Client(base_url=base, timeout=30)
+        check(bare.get("/api/records").status_code == 403, "トークンなしでは、記録を読めない")
+        check(bare.get("/api/health").status_code == 200, "起動の確認(/api/health)は、認証なしで応答する")
+        check(bare.post("/api/records", headers={"X-FanTracker": "1"}, json={"fan_total": 1, "captured_at": "2026-10-07T12:00:00"}).status_code == 403,
+              "トークンなしでは、記録を追加できない")
+        check(httpx.get(base + "/api/health", headers={"Host": "evil.example"}).status_code == 403, "許可されていない Host は拒否される")
+        h = c.get("/").headers
+        check("frame-ancestors 'none'" in h.get("content-security-policy", "") and h.get("x-frame-options") == "DENY",
+              "他サイトの iframe に入れられない(CSP / X-Frame-Options)")
+
         print("1. 画面と静的ファイル")
         page = c.get("/")
         check(page.status_code == 200 and "ファン数トラッカー" in page.text, "トップページが表示できる")
@@ -134,9 +148,9 @@ def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:  # 後片付けの失敗で確認結果を落とさない
-        server, thread, base = start_server(tmp)
+        server, thread, base, token = start_server(tmp)
         try:
-            run(base)
+            run(base, token)
         finally:
             server.should_exit = True
             thread.join(5)

@@ -2,9 +2,12 @@
 from pathlib import Path
 
 import pytest
+from urllib.parse import urlsplit
+
 from fastapi.testclient import TestClient
 from helpers import make_client
 
+from fantracker import security
 from fantracker.api import create_app
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -21,9 +24,12 @@ def client(app):
     return make_client(app)
 
 
-def raw(app, base_url="http://127.0.0.1:8000", headers=None):
-    """ヘッダーなしのクライアント(他サイトのページが送るリクエストに近い)。"""
-    return TestClient(app, base_url=base_url, headers=headers or {})
+def raw(app, base_url="http://127.0.0.1:8000", headers=None, auth=True):
+    """既定ではヘッダーなし・認証の Cookie あり。auth=False は、Cookie もない(他のユーザーや他サイトから)。"""
+    c = TestClient(app, base_url=base_url, headers=headers or {})
+    if auth:
+        c.cookies.set(security.cookie_name(urlsplit(base_url).netloc), app.state.token)
+    return c
 
 
 # ---- Host の許可リスト(DNS リバインディング対策) ----
@@ -65,11 +71,11 @@ def writes(c):
 
 
 def test_all_writes_are_rejected_without_header(app):
-    assert set(writes(raw(app)).values()) == {403}
+    assert set(writes(raw(app)).values()) == {403}  # Cookie があっても、ヘッダーがなければ拒否
 
 
 def test_header_alone_is_not_enough_from_another_origin(app):
-    c = raw(app, headers={"X-FanTracker": "1", "Origin": "https://evil.example"})
+    c = raw(app, headers={"X-FanTracker": "1", "Origin": "https://evil.example"})  # Cookie もヘッダーもあっても、別オリジンなら拒否
     assert set(writes(c).values()) == {403}
 
 
@@ -86,7 +92,7 @@ def test_same_origin_write_is_accepted(app):
 
 def test_form_post_like_cross_site_attack_cannot_change_data(app, client):
     """text/plain や multipart のフォーム送信(ヘッダーを付けられない)では、何も書き込めない。"""
-    c = raw(app, headers={"Origin": "https://evil.example"})
+    c = raw(app, headers={"Origin": "https://evil.example"}, auth=False)
     assert c.post("/api/records", content='{"fan_total": 1, "captured_at": "2026-10-07T12:00:00"}',
                   headers={"Content-Type": "text/plain"}).status_code == 403
     assert c.post("/api/import/csv", files={"file": ("a.csv", CSV)}, data={"mode": "overwrite"}).status_code == 403

@@ -49,7 +49,7 @@ try {
         Start-Sleep -Milliseconds 500
         foreach ($port in 8000..8019) {
             try {
-                $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:$port/api/records"
+                $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:$port/api/health"
                 if ($r.StatusCode -eq 200) { $ok = $true; break }
             } catch { }
         }

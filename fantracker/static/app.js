@@ -111,24 +111,31 @@ fileInput.addEventListener("change", () => { scanFiles([...fileInput.files]); fi
 
 let pendingItems = []; // {confirm(): Promise<boolean>, canBatch(): boolean}
 
+const SCAN_CHUNK = 20; // 1 回のリクエストで送る枚数(サーバーの上限は 100 枚。多数をまとめて取り込んでも、メモリを使いすぎない)
+
 async function scanFiles(files) {
   files = files.filter((f) => /\.(jpe?g|png)$/i.test(f.name));
   if (!files.length) return;
-  $("#scan-status").textContent = `${files.length} 枚を読み取り中…`;
   $("#scan-actions").hidden = false;
-  const fd = new FormData();
-  for (const f of files) {
-    fd.append("files", f);
-    fd.append("last_modified_ms", String(f.lastModified));
-  }
+  const box = $("#scan-results");
+  box.replaceChildren();
+  pendingItems = [];
+  let done = 0;
   try {
-    const { results } = await api("/api/scan", { method: "POST", body: fd });
-    const box = $("#scan-results");
-    box.replaceChildren();
-    pendingItems = results.map((r) => renderItem(r, box));
-    $("#scan-status").textContent = `${results.length} 件を読み取りました。内容を確認して確定してください。`;
+    for (let i = 0; i < files.length; i += SCAN_CHUNK) {
+      $("#scan-status").textContent = `${files.length} 枚を読み取り中… (${done}/${files.length})`;
+      const fd = new FormData();
+      for (const f of files.slice(i, i + SCAN_CHUNK)) {
+        fd.append("files", f);
+        fd.append("last_modified_ms", String(f.lastModified));
+      }
+      const { results } = await api("/api/scan", { method: "POST", body: fd });
+      pendingItems.push(...results.map((r) => renderItem(r, box)));
+      done += results.length;
+    }
+    $("#scan-status").textContent = `${done} 件を読み取りました。内容を確認して確定してください。`;
   } catch (e) {
-    $("#scan-status").textContent = "読み取りに失敗しました: " + e.message;
+    $("#scan-status").textContent = `読み取りに失敗しました(${done}/${files.length} 件まで): ` + e.message;
   }
 }
 

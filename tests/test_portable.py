@@ -97,6 +97,6 @@ def test_scan_warnings_are_written_to_log_file(tmp_path):
         for h in logging.getLogger().handlers:
             h.flush()
         text = (tmp_path / "logs" / "fantracker.log").read_text(encoding="utf-8")
-        assert "読み取り警告 screenshot.jpg" in text and "撮影日時を特定できません" in text
+        assert "読み取り警告 'screenshot.jpg'" in text and "撮影日時を特定できません" in text
     finally:
         logging.getLogger().handlers.clear()
