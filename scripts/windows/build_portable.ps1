@@ -56,12 +56,19 @@ try {
     }
 } finally {
     if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+    $null = $proc.WaitForExit(10000)   # 終了を待つ(ログや DB のファイルを、まだ掴んでいることがある)
 }
 if (-not $ok) { Stop-WithError '起動した exe から応答がありません(dist\FanTracker\data\logs を確認してください)。' }
 $db = Join-Path $appDir 'data\fantracker.db'
 if (-not (Test-Path $db)) { Stop-WithError "データが exe と同じフォルダに作られていません: $db" }
 Write-Host 'exe の起動と、データの保存先(exe と同じフォルダの data\)を確認しました。'
-Remove-Item -Recurse -Force (Join-Path $appDir 'data')   # 配布物に動作確認のデータを含めない
+# 配布物に動作確認のデータを含めない。プロセスが終わっても、ファイルのハンドルが閉じるまで少しかかることがあるので、やり直す
+$dataDir = Join-Path $appDir 'data'
+for ($i = 0; $i -lt 20 -and (Test-Path $dataDir); $i++) {
+    try { Remove-Item -Recurse -Force $dataDir -ErrorAction Stop }
+    catch { Start-Sleep -Milliseconds 500 }
+}
+if (Test-Path $dataDir) { Stop-WithError "動作確認で作られたデータを削除できません(使用中の可能性があります): $dataDir`n FanTracker.exe が残っていないか確認して、もう一度実行してください。" }
 
 Write-Step '4. zip の作成'
 $zip = Join-Path $root "dist\FanTracker-portable-v$version.zip"
