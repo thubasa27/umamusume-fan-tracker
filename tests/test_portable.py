@@ -87,13 +87,12 @@ def test_check_writable_creates_folder_and_rejects_unwritable(tmp_path):
 
 
 def test_scan_warnings_are_written_to_log_file(tmp_path):
-    from fastapi.testclient import TestClient
-
     from fantracker.api import create_app
+    from helpers import make_client
 
     entry.setup_logging(tmp_path)
     try:
-        client = TestClient(create_app(tmp_path))
+        client = make_client(create_app(tmp_path))
         client.post("/api/scan", files=[("files", ("screenshot.jpg", (REPO / "tests/fixtures/sample_1.jpg").read_bytes(), "image/jpeg"))])
         for h in logging.getLogger().handlers:
             h.flush()

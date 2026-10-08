@@ -18,8 +18,9 @@ function el(tag, props = {}, ...children) {
 // null/undefined を除いた子要素の配列(DOM の append/replaceChildren は null を "null" と描画してしまう)
 const kids = (...children) => children.flat().filter((c) => c != null);
 
-async function api(path, opts) {
-  const res = await fetch(path, opts);
+// 書き込み系には X-FanTracker ヘッダーが必須(他サイトからの送信を防ぐ。fantracker/security.py)
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { "X-FanTracker": "1", ...(opts.headers || {}) } });
   if (!res.ok) {
     let msg = res.statusText;
     try {
@@ -388,7 +389,7 @@ api("/api/info").then((info) => {
   btn.addEventListener("click", async () => {
     if (!confirm("アプリを終了しますか?")) return;
     try {
-      await api("/api/shutdown", { method: "POST", headers: { "X-FanTracker": "1" } });
+      await api("/api/shutdown", { method: "POST" });
       document.body.replaceChildren(el("p", { style: "padding:24px" }, "終了しました。このタブは閉じてください。"));
     } catch (e) {
       toast("終了できませんでした: " + e.message, true);

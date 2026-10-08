@@ -67,7 +67,7 @@ def confirm(c: httpx.Client, item: dict, **over) -> httpx.Response:
 
 
 def run(base: str) -> None:
-    with httpx.Client(base_url=base, timeout=30) as c:
+    with httpx.Client(base_url=base, timeout=30, headers={"X-FanTracker": "1"}) as c:
         print("1. 画面と静的ファイル")
         page = c.get("/")
         check(page.status_code == 200 and "ファン数トラッカー" in page.text, "トップページが表示できる")

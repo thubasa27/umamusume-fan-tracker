@@ -4,18 +4,18 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
-from . import __version__, anomaly, csvio, dates, ocr, paths, summary
+from . import __version__, anomaly, csvio, dates, ocr, paths, security, summary
 from .db import DuplicateImage, Store
 
 IMAGE_SUFFIXES = {"JPEG": ".jpg", "PNG": ".png"}
@@ -41,6 +41,7 @@ def create_app(
     data_dir: Path | str | None = None,
     mode: str = "browser",
     on_shutdown: Callable[[], None] | None = None,
+    allowed_hosts: Iterable[str] = security.DEFAULT_ALLOWED_HOSTS,
 ) -> FastAPI:
     """data_dir 省略時は実行ファイルと同じフォルダの data/(fantracker.paths.data_dir)。
 
@@ -59,6 +60,7 @@ def create_app(
     app = FastAPI(title="ウマ娘 ファン数トラッカー", lifespan=lifespan)
     app.state.store = store
     app.state.mode = mode
+    security.install(app, allowed_hosts)  # 他サイトからのアクセスを拒否(Host の許可リスト、書き込みはヘッダー必須)
 
     @app.get("/api/info")
     def info():
@@ -66,12 +68,10 @@ def create_app(
         return {"version": __version__, "mode": app.state.mode, "can_shutdown": browser and on_shutdown is not None}
 
     @app.post("/api/shutdown")
-    def shutdown(request: Request):
-        """ブラウザ表示のときの終了。カスタムヘッダー必須(他のサイトからの単純なリクエストでは止められない)。"""
+    def shutdown():
+        """ブラウザ表示のときの終了(X-FanTracker ヘッダーの確認は security のミドルウェアが行う)。"""
         if app.state.mode != "browser" or on_shutdown is None:
             raise HTTPException(404)
-        if request.headers.get("x-fantracker") != "1":
-            raise HTTPException(403, "X-FanTracker ヘッダーが必要です")
         log.info("終了が要求されました")
         on_shutdown()
         return {"ok": True}

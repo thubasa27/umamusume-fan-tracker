@@ -207,3 +207,86 @@ def test_quit_button_stops_the_app_in_browser_mode(server_with_quit):
     while not srv.should_exit and time.time() < deadline:
         time.sleep(0.05)
     assert srv.should_exit
+
+
+# ---- 他サイトからの攻撃を、実ブラウザで再現する ----
+
+def attack_page(server, extra_args=None):
+    """攻撃者のページ(別オリジン)に見立てた Chromium のページ。`evil.test` を 127.0.0.1 に向けて DNS リバインディングも再現する。"""
+    with pw.sync_playwright() as p:
+        try:
+            browser = p.chromium.launch(args=["--host-resolver-rules=MAP evil.test 127.0.0.1"] + (extra_args or []))
+        except Exception as e:
+            pytest.skip(f"chromium を起動できません: {e}")
+        yield browser.new_page()
+        browser.close()
+
+
+@pytest.fixture
+def attacker_site():
+    """別オリジンの「攻撃者のサイト」(`evil.test:<ポート>` として、ブラウザからだけ見える)。"""
+    import http.server
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = b"<html><body>attacker</body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f"http://evil.test:{httpd.server_address[1]}/"
+    httpd.shutdown()
+
+
+ATTACK_JS = """async (url) => {
+  const result = {};
+  const fd = new FormData();
+  fd.append("file", new Blob(["business_date,captured_at,fan_total\\n2026-10-05,2026-10-05T20:00:00,1\\n"]), "a.csv");
+  fd.append("mode", "overwrite");
+  // 1) マルチパートのフォーム送信(プリフライトなしの単純リクエスト)で CSV を上書き取り込み
+  try { await fetch(url + "/api/import/csv", { method: "POST", body: fd, mode: "no-cors" }); } catch (e) { result.csv = String(e); }
+  // 2) text/plain の JSON(これも単純リクエスト)で記録を追加
+  try { await fetch(url + "/api/records", { method: "POST", mode: "no-cors", headers: {"Content-Type": "text/plain"},
+                                           body: '{"fan_total":1,"captured_at":"2026-10-05T20:00:00"}' }); } catch (e) { result.text = String(e); }
+  // 3) カスタムヘッダー付き(プリフライトが必要。CORS を許可していないので失敗する)
+  try { await fetch(url + "/api/records", { method: "POST", headers: {"X-FanTracker": "1", "Content-Type": "application/json"},
+                                           body: '{"fan_total":1,"captured_at":"2026-10-05T20:00:00"}' }); } catch (e) { result.header = String(e); }
+  return result;
+}"""
+
+
+def test_cross_site_form_post_cannot_write_in_real_browser(server, attacker_site):
+    import json
+    import urllib.request
+
+    for pg in attack_page(server):
+        pg.goto(attacker_site)  # 別オリジン(evil.test)のページから、アプリ(127.0.0.1)へ送る
+        assert pg.evaluate("location.origin") != server
+        result = pg.evaluate(ATTACK_JS, server)
+        assert "header" in result  # カスタムヘッダー付きは、ブラウザ側(プリフライト)で止まる
+    with urllib.request.urlopen(f"{server}/api/records?include_history=true") as r:
+        assert json.load(r) == []  # 何も書き込まれていない
+
+
+def test_dns_rebinding_cannot_read_data_in_real_browser(server):
+    port = server.rsplit(":", 1)[1]
+    import urllib.request
+    req = urllib.request.Request(f"{server}/api/records", data=b'{"fan_total": 123456, "captured_at": "2026-10-05T20:00:00"}',
+                                 headers={"Content-Type": "application/json", "X-FanTracker": "1"}, method="POST")
+    urllib.request.urlopen(req).read()  # 正規の記録を1件入れておく
+    for pg in attack_page(server):
+        # evil.test が 127.0.0.1 を指す(DNS リバインディング)。同一オリジンになるので、ブラウザ側の制限は効かない
+        resp = pg.goto(f"http://evil.test:{port}/api/records")
+        assert resp.status == 403
+        assert "123456" not in pg.content()
+        status = pg.evaluate("async (u) => (await fetch(u + '/api/export.csv')).status", f"http://evil.test:{port}")
+        assert status == 403
+        # 正規のアドレスなら、同じページから読める(対策が正規の利用を妨げない)
+        assert pg.goto(f"http://127.0.0.1:{port}/api/records").status == 200
